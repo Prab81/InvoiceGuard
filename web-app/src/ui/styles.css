@@ -308,3 +308,24 @@ table.data tr.differs td:first-child { font-weight: 650; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------------------------------------------- attribute comparison */
+table.diff tbody.diff-group + tbody.diff-group tr:first-child th { padding-top: 18px; }
+tr.diff-group-head th {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
+  border-bottom: 1px solid var(--rule-strong); padding-bottom: 5px;
+}
+tr.diff-group-head th span { float: right; color: var(--ink-3); font-weight: 500; letter-spacing: .03em; }
+table.diff tr.differs td { background: var(--critical-soft); }
+table.diff tr.differs td:first-child { font-weight: 650; }
+table.diff tr.differs-expected td { color: var(--ink-3); }
+table.diff tr.why td {
+  font-size: 12.4px; color: var(--ink-2); padding-top: 0; padding-bottom: 9px;
+  border-bottom: 1px solid var(--rule); background: var(--critical-soft);
+}
+.diff-tag {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  padding: 1px 5px; border-radius: 3px; margin-left: 6px; vertical-align: 1px;
+}
+.tag-broken { background: var(--critical); color: var(--surface); }
+.tag-expected { background: var(--skip-soft); color: var(--skip); border: 1px solid var(--rule); }

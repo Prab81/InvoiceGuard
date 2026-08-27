@@ -227,6 +227,62 @@ function ledgerSection(ledger) {
   return groups || '<div class="ledger-group"><h4><span>Nothing in this filter</span></h4></div>';
 }
 
+/**
+ * Attribute comparison.
+ *
+ * Two differences are not the same kind of thing. An invoice number and an
+ * amount are *supposed* to change between two invoices; a producer string and a
+ * letterhead image are not. Colouring both red teaches a reviewer to ignore the
+ * colour, so expected differences are shown in grey and only the broken
+ * controls are flagged - each with the reason it matters, next to the evidence.
+ */
+function diffPanel(diff) {
+  const unexpected = diff.filter((r) => !r.same && !r.expected);
+  const expected = diff.filter((r) => !r.same && r.expected);
+
+  const groups = [];
+  for (const row of diff) {
+    let g = groups.find((x) => x.key === row.group);
+    if (!g) { g = { key: row.group, label: row.groupLabel, rows: [] }; groups.push(g); }
+    g.rows.push(row);
+  }
+
+  const body = groups.map((g) => {
+    const broken = g.rows.filter((r) => !r.same && !r.expected).length;
+    const rows = g.rows.map((r) => {
+      const cls = r.same ? '' : (r.expected ? 'differs-expected' : 'differs');
+      const tag = r.same ? '' : (r.expected
+        ? '<span class="diff-tag tag-expected">expected</span>'
+        : '<span class="diff-tag tag-broken">changed</span>');
+      const why = r.meaning
+        ? `<tr class="why"><td></td><td colspan="2">${esc(r.meaning)}</td></tr>`
+        : '';
+      return `<tr class="${cls}">
+        <td>${esc(r.field)} ${tag}</td>
+        <td class="v">${show(r.reference)}</td>
+        <td class="v">${show(r.subject)}</td>
+      </tr>${why}`;
+    }).join('');
+    return `<tbody class="diff-group">
+      <tr class="diff-group-head"><th colspan="3">${esc(g.label)}
+        <span>${broken ? `${broken} broken` : 'consistent'}</span></th></tr>
+      ${rows}
+    </tbody>`;
+  }).join('');
+
+  return `<section class="panel">
+    <div class="section-title">
+      <h3>Attribute comparison against the known-good invoice</h3>
+      <span class="fieldnote">${unexpected.length} attribute(s) that should have matched do not.
+        ${expected.length} difference(s) are normal between two invoices and are greyed out.</span>
+    </div>
+    <div class="scroll"><table class="data diff">
+      <thead><tr><th>Attribute</th><th>Known good</th><th>Under review</th></tr></thead>
+      ${body}
+    </table></div>
+  </section>`;
+}
+
 function detailsPanel(doc, heading) {
   const p = doc.payment;
   return `<section class="panel">
@@ -339,15 +395,7 @@ function render(result) {
       <div class="ledger" id="ledger">${ledgerSection(ledger)}</div>
     </section>
 
-    ${diff ? `<section class="panel">
-      <div class="section-title"><h3>Attribute comparison — ${diff.filter((r) => !r.same).length} of ${diff.length} differ</h3></div>
-      <div class="scroll"><table class="data">
-        <thead><tr><th>Attribute</th><th>Known good</th><th>Under review</th></tr></thead>
-        <tbody>${diff.map((r) => `<tr class="${r.same ? '' : 'differs'}">
-          <td>${esc(r.field)}</td><td class="v">${show(r.reference)}</td><td class="v">${show(r.subject)}</td>
-        </tr>`).join('')}</tbody>
-      </table></div>
-    </section>` : ''}
+    ${diff ? diffPanel(diff) : ''}
 
     ${detailsPanel(subject, 'Read from the invoice under review')}
     ${reference ? detailsPanel(reference, 'Read from the known-good invoice') : ''}

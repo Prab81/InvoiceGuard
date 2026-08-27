@@ -132,39 +132,102 @@ export function runRules(ctx) {
   return { ledger, findings };
 }
 
+/**
+ * The attribute-by-attribute comparison shown to the reviewer.
+ *
+ * Two properties matter for making a verdict understandable:
+ *
+ * `expected` marks the fields that legitimately differ between any two
+ * invoices - the number, the dates, the amount. Flagging those in red would
+ * cry wolf and teach the reviewer to ignore the colour. Only the fields a
+ * supplier's own template holds constant are treated as controls.
+ *
+ * `meaning` is the plain-English reason a difference in that field matters. It
+ * is shown next to the row, so the answer to "why is this fraudulent?" sits
+ * beside the evidence rather than in a separate document.
+ */
+const DIFF_GROUPS = {
+  payment: 'Where the money goes',
+  identity: 'Supplier identity',
+  invoice: 'Invoice content',
+  metadata: 'How the PDF was made',
+  forensics: 'How the page was built',
+};
+
 const DIFF_ROWS = [
-  ['Supplier', (d) => d.supplierName],
-  ['ABN', (d) => d.supplierAbn],
-  ['Builder licence', (d) => d.supplierLicence],
-  ['Contact email', (d) => d.supplierEmail],
-  ['Contact phone', (d) => d.supplierPhone],
-  ['Account name', (d) => d.payment.accountName],
-  ['Bank', (d) => d.payment.bankPrinted],
-  ['BSB', (d) => d.payment.bsbPrinted || d.payment.bsb],
-  ['Account number', (d) => d.payment.accountNumber],
-  ['Invoice number', (d) => d.invoiceNumber],
-  ['Invoice date', (d) => d.invoiceDate],
-  ['Due date', (d) => d.dueDate],
-  ['Amount due', (d) => (d.amountDue == null ? null : d.amountDue.toLocaleString('en-AU', { minimumFractionDigits: 2 }))],
-  ['PDF producer', (d) => d.meta.producer],
-  ['PDF creator', (d) => d.meta.creator],
-  ['Document title', (d) => d.meta.title],
-  ['Document author', (d) => d.meta.author],
-  ['PDF version', (d) => d.meta.pdfVersion],
-  ['File size', (d) => `${d.byteSize.toLocaleString()} bytes`],
-  ['Created', (d) => d.meta.creationDate],
-  ['Modified', (d) => d.meta.modDate],
-  ['Incremental saves', (d) => String(d.meta.incrementalUpdates)],
-  ['Body fonts', (d) => (d.layout.bodyFonts || []).slice(0, 4).join(', ')],
-  ['Payment-block fonts', (d) => (d.layout.paymentBlockFonts || []).slice(0, 4).join(', ')],
-  ['Letterhead image hash', (d) => (d.layout.imageHashes || []).slice(0, 2).join(', ')],
+  { group: 'payment', field: 'Account name', get: (d) => d.payment.accountName,
+    meaning: 'Held identical over a changed account number is exactly how a redirection survives a name-only review.' },
+  { group: 'payment', field: 'Bank', get: (d) => d.payment.bankPrinted,
+    meaning: 'The receiving institution changed. An established builder rarely moves banks mid-contract.' },
+  { group: 'payment', field: 'BSB', get: (d) => d.payment.bsbPrinted || d.payment.bsb,
+    meaning: 'A different BSB is a different bank and branch. This is the field that moves the money.' },
+  { group: 'payment', field: 'Account number', get: (d) => d.payment.accountNumber,
+    meaning: 'The field the fraud exists to change. Every other edit is decoration around this one.' },
+
+  { group: 'identity', field: 'Supplier', get: (d) => d.supplierName,
+    meaning: 'A different trading name on the same template.' },
+  { group: 'identity', field: 'ABN', get: (d) => d.supplierAbn,
+    meaning: 'A different ABN is a different legal entity, whatever the letterhead says.' },
+  { group: 'identity', field: 'Builder licence', get: (d) => d.supplierLicence,
+    meaning: 'Check the state building-licence register before accepting a changed number.' },
+  { group: 'identity', field: 'Contact email', get: (d) => d.supplierEmail,
+    meaning: 'Replies go here. A changed address is how a hijacked email thread stays hijacked.' },
+  { group: 'identity', field: 'Contact phone', get: (d) => d.supplierPhone,
+    meaning: 'Never call back on a number that arrived with the change. Use the number in the contract.' },
+
+  { group: 'invoice', field: 'Invoice number', get: (d) => d.invoiceNumber, expected: true },
+  { group: 'invoice', field: 'Invoice date', get: (d) => d.invoiceDate, expected: true },
+  { group: 'invoice', field: 'Due date', get: (d) => d.dueDate, expected: true },
+  { group: 'invoice', field: 'Amount due', expected: true,
+    get: (d) => (d.amountDue == null ? null : d.amountDue.toLocaleString('en-AU', { minimumFractionDigits: 2 })) },
+  { group: 'invoice', field: 'Payment reference note', get: (d) => d.payment.referenceNote,
+    meaning: 'Standing template wording. A change here means the block was retyped.' },
+
+  { group: 'metadata', field: 'PDF producer', get: (d) => d.meta.producer,
+    meaning: 'The software that wrote the file. A supplier’s billing system does not change between invoices - a re-render through an editor does.' },
+  { group: 'metadata', field: 'PDF creator', get: (d) => d.meta.creator,
+    meaning: 'The application the document came from before it was written to PDF.' },
+  { group: 'metadata', field: 'Document title', get: (d) => d.meta.title,
+    meaning: 'Accounting exports name the file. A blank title means an editor stripped the information dictionary.' },
+  { group: 'metadata', field: 'Document author', get: (d) => d.meta.author,
+    meaning: 'The bookkeeper who issued it. Losing the author points at the same re-render as the missing title.' },
+  { group: 'metadata', field: 'PDF version', get: (d) => d.meta.pdfVersion,
+    meaning: 'A version that goes backwards means a different generator re-wrote the page, not the same one exporting again.' },
+  { group: 'metadata', field: 'File size', get: (d) => `${d.byteSize.toLocaleString()} bytes`,
+    meaning: 'The same one-page template at a very different size means the page was re-rasterised or its fonts were re-embedded.' },
+  { group: 'metadata', field: 'Created', get: (d) => d.meta.creationDate, expected: true },
+  { group: 'metadata', field: 'Modified', get: (d) => d.meta.modDate, expected: true },
+
+  { group: 'forensics', field: 'Incremental saves', get: (d) => String(d.meta.incrementalUpdates),
+    meaning: 'Above zero means the file was appended to after it was first written. The earlier revision is still inside it.' },
+  { group: 'forensics', field: 'Body fonts', get: (d) => (d.layout.bodyFonts || []).slice(0, 4).join(', '),
+    meaning: 'The same template re-exported keeps its typefaces. A different font set means the page was rebuilt from scratch.' },
+  { group: 'forensics', field: 'Payment-block fonts', get: (d) => (d.layout.paymentBlockFonts || []).slice(0, 4).join(', '),
+    meaning: 'A typeface that appears only in the payment block means those characters were typed in on top of the original.' },
+  { group: 'forensics', field: 'Letterhead image', get: (d) => (d.layout.imageHashes || []).slice(0, 2).join(', '),
+    meaning: 'One export reuses the same image bytes. A different hash means the logo was re-encoded, so the page was rebuilt rather than re-exported.' },
+  { group: 'forensics', field: 'Accounts found in file', get: (d) => (d.layout.allBsbMatches || []).join(', ') || 'one',
+    meaning: 'Every BSB found anywhere in the page objects, including any hidden beneath an overlay. Two or more in one file means the original details are still in there, under the replacement.' },
 ];
 
+export { DIFF_GROUPS };
+
 export function buildDiff(subject, reference) {
-  return DIFF_ROWS.map(([field, get]) => {
+  return DIFF_ROWS.map(({ field, group, get, meaning, expected }) => {
     const a = get(reference) ?? null;
     const b = get(subject) ?? null;
-    return { field, reference: a, subject: b, same: String(a) === String(b) };
+    const same = String(a) === String(b);
+    return {
+      field,
+      group,
+      groupLabel: DIFF_GROUPS[group],
+      reference: a,
+      subject: b,
+      same,
+      expected: Boolean(expected),
+      // Only explain a difference that should not have happened.
+      meaning: !same && !expected ? meaning || null : null,
+    };
   });
 }
 
