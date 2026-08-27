@@ -28,6 +28,7 @@ AUTHENTIC_2 = "authentic_INV-101540.pdf"
 UNSEEN_GENUINE = "authentic_INV-101551.pdf"
 CW_GENUINE = "authentic_INV-2291.pdf"
 CW_FORGED = "fraudulent_INV-2304.pdf"
+RETYPED = "retyped_INV-101549.pdf"
 FRAUD = "fraudulent_INV-101544.pdf"
 TAMPERED = "tampered_INV-101541.pdf"
 
@@ -137,7 +138,7 @@ def test_tampered_invoice_is_blocked_on_forensics(store):
     found = codes(result)
     assert "FOR_HIDDEN_TEXT_UNDER_OVERLAY" in found
     assert "PAY_MULTIPLE_ACCOUNTS_ON_DOC" in found
-    assert "FOR_FONT_DRIFT_IN_PAYMENT_BLOCK" in found
+    assert "FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK" in found
 
 
 def test_genuine_invoice_already_on_file_scores_clean(store):
@@ -248,3 +249,45 @@ def test_the_two_cases_do_not_share_an_account(store):
     b = extract(read(CW_GENUINE), CW_GENUINE)
     assert a.payment.key != b.payment.key
     assert not store.suppliers_for_account(b.payment.bsb, b.payment.account_number)
+
+
+# ------------------------------------------------------------- typography
+def test_font_family_ignores_subset_prefix_and_weight():
+    from invoiceguard.extract import font_family
+    assert font_family("AAAAAA+DejaVuSans-Bold") == "DejaVuSans"
+    assert font_family("Helvetica-Bold") == "Helvetica"
+    assert font_family("Helvetica") == "Helvetica"
+
+
+def test_a_patch_in_the_pages_own_typeface_is_caught_on_point_size(store):
+    """The retyped sample keeps Helvetica throughout and only drops half a
+    point, so a check that compares typeface names sees a clean document."""
+    inv = extract(read(RETYPED), RETYPED)
+    typo = inv.layout.typography
+    assert [f for f, _ in typo["payment_detail_fonts"]] == ["Helvetica"]
+    assert len(typo["payment_detail_sizes"]) > 1
+
+    found = codes(analyze_single(read(RETYPED), RETYPED, store))
+    assert "FOR_FONT_SIZE_DRIFT_IN_PAYMENT_BLOCK" in found
+    assert "FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK" not in found
+
+
+def test_an_amount_set_differently_from_its_column_is_flagged(store):
+    inv = extract(read(RETYPED), RETYPED)
+    outliers = inv.layout.typography["figure_outliers"]
+    assert [o["text"] for o in outliers] == ["52,000.00"]
+    assert "FOR_TYPOGRAPHY_OUTLIER_IN_FIGURES" in codes(analyze_single(read(RETYPED), RETYPED, store))
+
+
+@pytest.mark.parametrize("name", [AUTHENTIC, UNSEEN_GENUINE, CW_GENUINE])
+def test_a_bold_total_is_not_a_typography_anomaly(name):
+    """Genuine templates set the total in bold. Comparing families rather than
+    full PostScript names is what stops that being a finding."""
+    assert extract(read(name), name).layout.typography["figure_outliers"] == []
+
+
+def test_the_two_block_font_rules_never_both_fire(store):
+    for name in (AUTHENTIC, UNSEEN_GENUINE, FRAUD, TAMPERED, RETYPED, CW_GENUINE, CW_FORGED):
+        found = codes(analyze_single(read(name), name, store))
+        assert not ({"FOR_FONT_DRIFT_IN_PAYMENT_BLOCK",
+                     "FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK"} <= found), name

@@ -12,6 +12,7 @@ Case one - Harrowgate Homes. The forger controls the document only.
   authentic_INV-101551.pdf   a genuine invoice the baseline has never seen
   fraudulent_INV-101544.pdf  anonymous re-render paying a Commonwealth account
   tampered_INV-101541.pdf    the ANZ original with a patch pasted over the payments
+  retyped_INV-101549.pdf     a subtler edit: the same typeface, half a point smaller
 
 Case two - Calderwood Constructions. The attacker also controls the email
 channel, which is what supplier-email compromise actually looks like: a
@@ -332,6 +333,47 @@ def build_tampered(sup: Supplier) -> Path:
     return path
 
 
+def build_retyped(sup: Supplier) -> Path:
+    """The subtle version: the payment details and the amount are retyped in the
+    page's own typeface, but half a point smaller and a hair off the baseline.
+
+    Nothing about the fonts *set* changes, so a check that only compares
+    typeface names sees a clean document. Only the point size gives it away."""
+    path = OUT / "retyped_INV-101549.pdf"
+    regular, bold = _fonts(embed=False)
+    c = canvas.Canvas(str(path), pagesize=A4)
+    geom = draw_invoice(c, sup, {
+        "email": sup.email, "phone": sup.phone,
+        "date": "20 Jan 2026", "number": "INV-101549", "reference": "1132",
+        "item": "Lock up stage", "unit_price": "35,454.5455", "line_amount": "35,454.55",
+        "subtotal": "35,454.55", "gst": "3,545.45", "total": "39,000.00", "due": "03 Feb 2026",
+        "account_name": sup.legal_name, "bank": sup.bank, "bsb": sup.bsb, "account": sup.account,
+    }, regular, bold, _logo(sup, 120, noisy=False))
+
+    ys = geom["payment_y"]
+    c.setFillColor(white)
+    c.setStrokeColor(white)
+    c.rect(50, ys["Account"] - 3, 250, (ys["Bank"] + 9) - (ys["Account"] - 3), stroke=0, fill=1)
+    c.setFillColor(HexColor(sup.ink))
+    c.setFont(regular, 8.0)                      # the page is set at 8.5
+    c.drawString(55, ys["Bank"] + 0.4, "Bank: Commonwealth")
+    c.drawString(55, ys["BSB"] + 0.4, "BSB: 062-000")
+    c.drawString(55, ys["Account"] + 0.4, "Account: 10456213")
+
+    # ... and the amount due is overwritten at the same wrong size.
+    right = W - 55
+    c.setFillColor(white)
+    c.rect(right - 70, ys["Bank"] + 132, 72, 11, stroke=0, fill=1)
+    c.setFillColor(HexColor(sup.ink))
+    c.setFont(regular, 8.0)
+    c.drawRightString(right, ys["Bank"] + 135, "52,000.00")
+    c.save()
+    set_metadata(path, producer="Microsoft: Print To PDF", creator="Microsoft: Print To PDF",
+                 title=None, author=None, created="D:20260119161000+11'00'",
+                 modified="D:20260120103000+11'00'", version="1.7")
+    return path
+
+
 def main() -> None:
     made = []
 
@@ -365,6 +407,7 @@ def main() -> None:
                       created="D:20260209231900+11'00'", modified="D:20260209232400+11'00'",
                       version="1.4", embed_fonts=True, noisy_logo=True, logo_px=260)[0])
     made.append(build_tampered(HARROWGATE))
+    made.append(build_retyped(HARROWGATE))
 
     # ---- case two: the attacker also controls the email channel -----------
     made.append(build(CALDERWOOD, "authentic_INV-2291.pdf", number="INV-2291",

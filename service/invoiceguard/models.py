@@ -102,6 +102,7 @@ class LayoutFacts:
     overprint_ratio: float = 0.0
     text_layers: list[dict[str, Any]] = field(default_factory=list)
     payment_candidates: list[dict[str, Any]] = field(default_factory=list)
+    typography: dict[str, Any] = field(default_factory=dict)
     image_count: int = 0
     image_hashes: list[str] = field(default_factory=list)
     full_page_image: bool = False

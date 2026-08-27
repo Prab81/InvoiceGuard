@@ -10,7 +10,7 @@ import { test, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { extract, setPdfjs, parseDate } from '../src/engine/extract.js';
+import { extract, setPdfjs, parseDate, fontFamily } from '../src/engine/extract.js';
 import { analyze, knownGoodFromDetails, knownGoodFromReference } from '../src/engine/analyze.js';
 import { RULES } from '../src/engine/catalog.js';
 import { score } from '../src/engine/scoring.js';
@@ -36,6 +36,7 @@ before(async () => {
   docs.tampered = await load('tampered_INV-101541.pdf');
   docs.cwGenuine = await load('authentic_INV-2291.pdf');
   docs.cwForged = await load('fraudulent_INV-2304.pdf');
+  docs.retyped = await load('retyped_INV-101549.pdf');
 });
 
 const firedIds = (r) => r.ledger.filter((e) => e.status === 'triggered').map((e) => e.id);
@@ -136,7 +137,7 @@ test('the crude overlay tamper is caught on structure alone', () => {
   const r = analyze({ subject: docs.tampered });
   assert.equal(r.risk.band, 'high_risk');
   const fired = firedIds(r);
-  for (const id of ['FOR_HIDDEN_TEXT_UNDER_OVERLAY', 'PAY_MULTIPLE_ACCOUNTS_ON_DOC', 'FOR_FONT_DRIFT_IN_PAYMENT_BLOCK']) {
+  for (const id of ['FOR_HIDDEN_TEXT_UNDER_OVERLAY', 'PAY_MULTIPLE_ACCOUNTS_ON_DOC', 'FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK']) {
     assert.ok(fired.includes(id), `${id} did not fire`);
   }
 });
@@ -251,4 +252,51 @@ test('the genuine second-case invoice is clean against its own known good', () =
 test('comparing across the two unrelated suppliers is flagged, not scored', () => {
   const r = analyze({ subject: docs.cwForged, reference: docs.genuine });
   assert.ok(r.notices.some((n) => /not look like the same supplier/.test(n.text)));
+});
+
+
+/* ------------------------------------------------------ typography checks */
+test('a patch in the page own typeface is caught on point size alone', () => {
+  // The retyped sample keeps Helvetica throughout and only drops half a point,
+  // so a check that compares typeface names sees a clean document.
+  const t = docs.retyped.layout.typography;
+  assert.deepEqual(t.paymentDetailFonts.map((f) => f[0]), ['Helvetica']);
+  assert.ok(t.paymentDetailSizes.length > 1, 'the mixed point sizes were not detected');
+
+  const r = analyze({ subject: docs.retyped, reference: docs.genuine });
+  const fired = firedIds(r);
+  assert.ok(fired.includes('FOR_FONT_SIZE_DRIFT_IN_PAYMENT_BLOCK'));
+  assert.ok(!fired.includes('FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK'),
+    'the family rule must stay silent - that is the point of this sample');
+  assert.equal(r.risk.band, 'high_risk');
+});
+
+test('an amount set differently from every other amount is flagged', () => {
+  const r = analyze({ subject: docs.retyped, reference: docs.genuine });
+  const hit = r.ledger.find((e) => e.id === 'FOR_TYPOGRAPHY_OUTLIER_IN_FIGURES');
+  assert.equal(hit.status, 'triggered');
+  assert.match(hit.evidence, /52,000\.00/);
+});
+
+test('a bold total is not a typography anomaly', () => {
+  // Genuine templates set the total in bold. Comparing families rather than
+  // full PostScript names is what stops that being a finding.
+  for (const doc of [docs.genuine, docs.genuineNew, docs.cwGenuine]) {
+    assert.equal(doc.layout.typography.figureOutliers.length, 0, doc.filename);
+  }
+});
+
+test('font families ignore subset prefixes and weight suffixes', () => {
+  assert.equal(fontFamily('AAAAAA+DejaVuSans-Bold'), 'DejaVuSans');
+  assert.equal(fontFamily('Helvetica-Bold'), 'Helvetica');
+  assert.equal(fontFamily('Helvetica'), 'Helvetica');
+});
+
+test('the two payment-block font rules never both fire', () => {
+  for (const doc of Object.values(docs)) {
+    const fired = firedIds(analyze({ subject: doc, reference: docs.genuine }));
+    const both = fired.includes('FOR_FONT_DRIFT_IN_PAYMENT_BLOCK')
+      && fired.includes('FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK');
+    assert.ok(!both, `${doc.filename} double-counted the block font finding`);
+  }
 });

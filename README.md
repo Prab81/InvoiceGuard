@@ -80,9 +80,9 @@ bundled forgery rather than assumed:
 
 | Known-good input | Checks that run | Score | Verdict |
 |---|---|---|---|
-| Nothing | 27 of 50 | 28 | Review only — **the forgery gets through** |
-| Bank details typed in | 33–36 of 50 | 90 | Block |
-| A known-good invoice | 48 of 50 | 100 | Block |
+| Nothing | 30 of 53 | 28 | Review only — **the forgery gets through** |
+| Bank details typed in | 36–39 of 53 | 90 | Block |
+| A known-good invoice | 51 of 53 | 100 | Block |
 
 So the console refuses to run until one of the two is present. A reference
 invoice runs more checks; typed BSB and account number are enough to block.
@@ -100,7 +100,7 @@ one it found.
   checks actually ran.
 * **Rules triggered** — each with the parameter it examined, the rule id, the
   evidence, and the action.
-* **Full rule ledger** — all 50 checks in three states: triggered, clear, and
+* **Full rule ledger** — all 53 checks in three states: triggered, clear, and
   *not run with the reason why*. A check that silently does not run is worse
   than one that fails loudly.
 * **Attribute comparison** — grouped by what each attribute is for, separating
@@ -111,12 +111,34 @@ one it found.
 
 ---
 
+## Typography checks
+
+A forger who retypes a field inside the page's own tool keeps the typeface and
+misses the point size. Three checks cover that, all comparing typeface
+*families* rather than PostScript names, so a bold total is never an anomaly:
+
+| Check | What it catches |
+|---|---|
+| `FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK` | the block mixes two families — part of it was retyped |
+| `FOR_FONT_SIZE_DRIFT_IN_PAYMENT_BLOCK` | the block mixes two point sizes — the same trick, invisible to a font-name check |
+| `FOR_TYPOGRAPHY_OUTLIER_IN_FIGURES` | one amount set differently from every other amount on the page |
+
+The bundled `retyped_INV-101549.pdf` exists to prove the second and third:
+its patch is Helvetica throughout, half a point smaller, so the family check
+correctly stays silent and only the size checks fire.
+
+`FOR_FONT_DRIFT_IN_PAYMENT_BLOCK` covers the remaining case — the *whole* block
+set in a typeface used nowhere else — and is mutually exclusive with the family
+check, so a single edit is never counted twice.
+
+---
+
 ## Running the console
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm test         # 23 engine tests
+npm test         # 33 engine tests
 npm run build    # -> dist/
 ```
 
@@ -141,7 +163,7 @@ npx vercel --prod
 ```bash
 cd service
 ./run.sh                              # http://127.0.0.1:8000
-./.venv/bin/python -m pytest tests -q  # 20 tests
+./.venv/bin/python -m pytest tests -q  # 30 tests
 ```
 
 Full rule catalogue, scoring model and limitations: [`service/README.md`](service/README.md).
@@ -155,7 +177,7 @@ index.html  vite.config.js  vercel.json     the console (Vercel deploys this)
 src/engine/
   reference.js   BSB registry, ABN checksum, editor fingerprints, stage vocabulary
   extract.js     PDF -> fields, geometry and forensic facts (raw bytes + pdf.js)
-  catalog.js     all 50 rules, declared as data so the ledger renders itself
+  catalog.js     all 53 rules, declared as data so the ledger renders itself
   scoring.js     weighted model with per-layer caps -> score, band, decision
   analyze.js     orchestration, known-good normalisation, explained comparison
 src/ui/          console

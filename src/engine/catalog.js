@@ -9,7 +9,7 @@ import {
   BANK_CHANGE_NOTICE, URGENCY_LANGUAGE, accountDigitRange, canonicalBankName,
   classifyStage, lookupBsb, matchEditorFingerprint, validateAbn,
 } from './reference.js';
-import { daysBetween, metaDateGapHours } from './extract.js';
+import { daysBetween, fontFamily, metaDateGapHours } from './extract.js';
 
 export const LAYERS = {
   payment: {
@@ -301,18 +301,87 @@ const forensicsRules = [
   },
   {
     id: 'FOR_FONT_DRIFT_IN_PAYMENT_BLOCK',
-    title: 'Payment block uses a typeface found nowhere else on the page',
-    parameter: 'Fonts in the payment block vs the rest of the page',
+    title: 'The whole payment block is set in a typeface used nowhere else',
+    parameter: 'Payment-block typeface families vs the rest of the page',
     layer: 'forensics', severity: 'high', weight: 22,
     requires: ({ doc }) => (doc.layout.paymentBlockFonts?.length && doc.layout.bodyFonts?.length
       ? null : 'The payment block could not be separated from the body text.'),
     evaluate({ doc }) {
-      const exclusive = doc.layout.paymentBlockFonts.filter((f) => !doc.layout.bodyFonts.includes(f));
-      if (!exclusive.length) return null;
+      const fam = (list) => [...new Set(list.map(fontFamily))];
+      const block = fam(doc.layout.paymentBlockFonts);
+      const body = fam(doc.layout.bodyFonts);
+      const shared = block.filter((f) => body.includes(f));
+      // A block that still shares a family with the page is a partial patch;
+      // FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK owns that case, so this rule
+      // fires only when the entire block was replaced.
+      if (shared.length || !block.length) return null;
       return {
-        evidence: `Fonts unique to the payment block: ${exclusive.join(', ')}. Body fonts: ${doc.layout.bodyFonts.slice(0, 4).join(', ')}.`,
-        recommendation: 'A single template renders one font set. A separate typeface in exactly the block that matters means those characters were typed in later.',
-        detail: { exclusive },
+        evidence: `The payment block is set entirely in ${block.join(', ')}, which appears nowhere `
+          + `else on the page. The body is set in ${body.slice(0, 4).join(', ')}.`,
+        recommendation: 'The whole block was replaced rather than edited. Compare against a known-good invoice.',
+        detail: { block, body },
+      };
+    },
+  },
+  {
+    id: 'FOR_FONT_SIZE_DRIFT_IN_PAYMENT_BLOCK',
+    title: 'Payment details are set at more than one point size',
+    parameter: 'Point sizes across the Account/Bank/BSB lines',
+    layer: 'forensics', severity: 'high', weight: 20,
+    requires: ({ doc }) => (doc.layout.typography?.paymentDetailSizes?.length
+      ? null : 'The payment-detail lines could not be isolated on the page.'),
+    evaluate({ doc }) {
+      const sizes = doc.layout.typography.paymentDetailSizes;
+      if (sizes.length < 2) return null;
+      const [dominant] = sizes[0];
+      const odd = sizes.slice(1);
+      return {
+        evidence: `The payment block mixes ${sizes.length} point sizes: `
+          + sizes.map(([size, n]) => `${size}pt on ${n} run(s)`).join(', ')
+          + `. One template renders the whole block at ${dominant}pt.`,
+        recommendation: 'A forger retyping inside the same tool keeps the typeface and misses the point size. '
+          + 'Compare the block visually against a known-good invoice.',
+        detail: { dominant, odd },
+      };
+    },
+  },
+  {
+    id: 'FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK',
+    title: 'Payment details are set in more than one typeface family',
+    parameter: 'Typeface families across the Account/Bank/BSB lines',
+    layer: 'forensics', severity: 'high', weight: 20,
+    requires: ({ doc }) => (doc.layout.typography?.paymentDetailFonts?.length
+      ? null : 'The payment-detail lines could not be isolated on the page.'),
+    evaluate({ doc }) {
+      const fonts = doc.layout.typography.paymentDetailFonts;
+      if (fonts.length < 2) return null;
+      return {
+        evidence: `The payment block mixes ${fonts.length} typeface families: `
+          + fonts.map(([font, n]) => `${font} on ${n} run(s)`).join(', ')
+          + '. Weight changes are normal; a second family is not.',
+        recommendation: 'Those characters were typed in later, in a different tool from the one that made the page.',
+        detail: { fonts },
+      };
+    },
+  },
+  {
+    id: 'FOR_TYPOGRAPHY_OUTLIER_IN_FIGURES',
+    title: 'A monetary figure is set differently from every other figure',
+    parameter: 'Typeface family and point size of each amount on the page',
+    layer: 'forensics', severity: 'high', weight: 18,
+    requires: ({ doc }) => ((doc.layout.typography?.figureCount || 0) >= 3
+      ? null : 'Fewer than three monetary figures were found to compare.'),
+    evaluate({ doc }) {
+      const t = doc.layout.typography;
+      if (!t.figureOutliers.length) return null;
+      return {
+        evidence: `Every other amount on this page is set in ${t.dominantFigureFont} at `
+          + `${t.dominantFigureSize}pt. These are not: `
+          + t.figureOutliers.map((o) => `"${o.text}" in ${o.font} at ${o.size}pt`).join('; ')
+          + '.',
+        recommendation: 'An amount that does not match the rest of its own column was written after the page was. '
+          + 'Check it against the contract stage schedule before releasing funds.',
+        detail: { outliers: t.figureOutliers, dominant: `${t.dominantFigureFont}@${t.dominantFigureSize}` },
       };
     },
   },

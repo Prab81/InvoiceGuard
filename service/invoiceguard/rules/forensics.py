@@ -49,8 +49,14 @@ def evaluate(inv: ExtractedInvoice, ctx) -> list[Finding]:
         ))
 
     if lay.payment_block_fonts and lay.body_fonts:
-        exclusive = [f for f in lay.payment_block_fonts if f and f not in lay.body_fonts]
-        if exclusive:
+        from ..extract import font_family
+        block_fams = {font_family(f) for f in lay.payment_block_fonts if f}
+        body_fams = {font_family(f) for f in lay.body_fonts if f}
+        exclusive = sorted(block_fams - body_fams)
+        # A block that still shares a family with the page is a partial patch;
+        # FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK owns that case, so this rule
+        # fires only when the entire block was replaced.
+        if exclusive and not (block_fams & body_fams):
             out.append(Finding(
                 code="FOR_FONT_DRIFT_IN_PAYMENT_BLOCK",
                 title="Payment block uses a font that appears nowhere else on the page",
@@ -61,6 +67,49 @@ def evaluate(inv: ExtractedInvoice, ctx) -> list[Finding]:
                                 "that matters means those characters were typed in later."),
                 detail={"exclusive": exclusive, "body": lay.body_fonts},
             ))
+
+    typo = lay.typography or {}
+    detail_sizes = typo.get("payment_detail_sizes") or []
+    if len(detail_sizes) > 1:
+        out.append(Finding(
+            code="FOR_FONT_SIZE_DRIFT_IN_PAYMENT_BLOCK",
+            title="Payment details are set at more than one point size",
+            layer="forensics", severity="high", weight=20,
+            evidence=("The payment block mixes "
+                      + ", ".join(f"{size}pt on {n} run(s)" for size, n in detail_sizes)
+                      + f". One template renders the whole block at {detail_sizes[0][0]}pt."),
+            recommendation=("A forger retyping inside the same tool keeps the typeface and misses the "
+                            "point size. Compare the block against a known-good invoice."),
+            detail={"sizes": detail_sizes},
+        ))
+
+    detail_fonts = typo.get("payment_detail_fonts") or []
+    if len(detail_fonts) > 1:
+        out.append(Finding(
+            code="FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK",
+            title="Payment details are set in more than one typeface family",
+            layer="forensics", severity="high", weight=20,
+            evidence=("The payment block mixes "
+                      + ", ".join(f"{font} on {n} run(s)" for font, n in detail_fonts)
+                      + ". Weight changes are normal; a second family is not."),
+            recommendation="Those characters were typed in later, in a different tool from the one that made the page.",
+            detail={"fonts": detail_fonts},
+        ))
+
+    figure_outliers = typo.get("figure_outliers") or []
+    if figure_outliers and (typo.get("figure_count") or 0) >= 3:
+        out.append(Finding(
+            code="FOR_TYPOGRAPHY_OUTLIER_IN_FIGURES",
+            title="A monetary figure is set differently from every other figure",
+            layer="forensics", severity="high", weight=18,
+            evidence=(f"Every other amount on this page is set in {typo.get('dominant_figure_font')} at "
+                      f"{typo.get('dominant_figure_size')}pt. These are not: "
+                      + "; ".join(f"\"{o['text']}\" in {o['font']} at {o['size']}pt" for o in figure_outliers)
+                      + "."),
+            recommendation=("An amount that does not match the rest of its own column was written after the "
+                            "page was. Check it against the contract stage schedule before releasing funds."),
+            detail={"outliers": figure_outliers},
+        ))
 
     if lay.line_gap_anomaly is not None and lay.line_gap_anomaly > 0.35:
         out.append(Finding(

@@ -244,6 +244,61 @@ function scanPaymentTokens(text) {
   return { bsbs: [...new Set(bsbs)], accounts: [...new Set(accounts)] };
 }
 
+/** Runs that carry a monetary figure - the fields worth editing. */
+const RE_FIGURE = /^-?[\d,]+\.\d{2,4}$/;
+
+/**
+ * Strip a subset prefix and a weight/style suffix to get the typeface family.
+ *
+ * A genuine template varies weight for emphasis - a bold total is not an
+ * anomaly - so comparisons are made on the family, never the full PostScript
+ * name. 'AAAAAA+DejaVuSans-Bold' and 'DejaVuSans' are the same family.
+ */
+export function fontFamily(name) {
+  return String(name || '')
+    .replace(/^[A-Z]{6}\+/, '')
+    .replace(/[-,_](?:Bold|Italic|Oblique|BoldItalic|BoldOblique|Regular|Roman|Light|Medium|Semibold|Black)$/i, '')
+    .trim();
+}
+
+function tally(items) {
+  const counts = new Map();
+  for (const key of items) counts.set(key, (counts.get(key) || 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+/**
+ * Typeface and point size, profiled across the page.
+ *
+ * A forger retyping a field inside the same tool often keeps the typeface and
+ * misses the point size by a fraction. Comparing font names alone never sees
+ * that, so both are profiled: the payment block should render in one font at
+ * one size, and every monetary figure on the page should match every other.
+ */
+function typographyFacts(runs, detailRuns) {
+  const round = (n) => Math.round(n * 10) / 10;
+  const body = tally(runs.map((r) => `${fontFamily(r.font)}@${round(r.size)}`));
+  const [dominantFont, dominantSize] = (body[0]?.[0] || '@').split('@');
+
+  const figures = runs.filter((r) => RE_FIGURE.test(r.text.trim()));
+  const figureProfile = tally(figures.map((r) => `${fontFamily(r.font)}@${round(r.size)}`));
+  const [domFigFont, domFigSize] = (figureProfile[0]?.[0] || '@').split('@');
+
+  return {
+    dominantFont: dominantFont || null,
+    dominantSize: dominantSize ? Number(dominantSize) : null,
+    paymentDetailFonts: tally(detailRuns.map((r) => fontFamily(r.font))),
+    paymentDetailSizes: tally(detailRuns.map((r) => round(r.size))),
+    figureCount: figures.length,
+    dominantFigureFont: domFigFont || null,
+    dominantFigureSize: domFigSize ? Number(domFigSize) : null,
+    figureOutliers: figures
+      .filter((r) => fontFamily(r.font) !== domFigFont
+        || Math.abs(round(r.size) - Number(domFigSize)) > 0.2)
+      .map((r) => ({ text: r.text.trim(), font: fontFamily(r.font), size: round(r.size) })),
+  };
+}
+
 /** Fraction of runs painted on top of another run. */
 function overprintRatio(runs) {
   if (runs.length < 8) return 0;
@@ -490,6 +545,11 @@ function emptyLayout() {
     overlays: [], coveredSnippets: [], invisibleSnippets: [], allBsbMatches: [], allAccountMatches: [],
     lineGapAnomaly: null, imageCount: 0, imageHashes: [], fullPageImage: false, runCount: 0,
     overprintRatio: 0, textLayers: [], paymentCandidates: [], labelAnchors: {},
+    typography: {
+      dominantFont: null, dominantSize: null,
+      paymentDetailFonts: [], paymentDetailSizes: [],
+      figureCount: 0, dominantFigureFont: null, dominantFigureSize: null, figureOutliers: [],
+    },
   };
 }
 
@@ -536,6 +596,7 @@ function buildLayout({ runs, lines, text, shapes, viewport, imageHashes }) {
       const med = sorted[Math.floor(sorted.length / 2)];
       if (med > 0) L.lineGapAnomaly = Math.max(...gaps.map((g) => Math.abs(g - med) / med));
     }
+    L.typography = typographyFacts(runs, detailLines.flat());
     for (const line of detailLines) {
       const t = lineText(line);
       for (const label of ['Account Name', 'Bank', 'BSB', 'Account']) {
@@ -546,6 +607,7 @@ function buildLayout({ runs, lines, text, shapes, viewport, imageHashes }) {
     }
   } else {
     L.bodyFonts = [...new Set(runs.map((r) => r.font))].sort();
+    L.typography = typographyFacts(runs, []);
   }
 
   // --- every payment-looking token anywhere in the page objects ---------

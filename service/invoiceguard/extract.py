@@ -146,6 +146,81 @@ def _raw_facts(data: bytes) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 # layout layer
 # --------------------------------------------------------------------------
+RE_FIGURE = re.compile(r"^-?[\d,]+\.\d{2,4}$")
+
+
+def font_family(name: str | None) -> str:
+    """Strip a subset prefix and a weight/style suffix to get the family.
+
+    A genuine template varies weight for emphasis - a bold total is not an
+    anomaly - so comparisons are made on the family, never the full PostScript
+    name.
+    """
+    fam = re.sub(r"^[A-Z]{6}\+", "", str(name or ""))
+    return re.sub(
+        r"[-,_](?:Bold|Italic|Oblique|BoldItalic|BoldOblique|Regular|Roman|Light|Medium|Semibold|Black)$",
+        "", fam, flags=re.I).strip()
+
+
+def _tally(items) -> list[tuple[Any, int]]:
+    counts: dict[Any, int] = {}
+    for key in items:
+        counts[key] = counts.get(key, 0) + 1
+    return sorted(counts.items(), key=lambda kv: -kv[1])
+
+
+def _words(line: list[dict]) -> list[list[dict]]:
+    """Split a line into gap-separated runs, so a figure is profiled on its own
+    rather than inside whatever label happens to share its line."""
+    words: list[list[dict]] = []
+    prev = None
+    for ch in sorted(line, key=lambda c: c["x0"]):
+        gap = ch["x0"] - prev["x1"] if prev else 0
+        if prev is None or gap > max(0.8, 0.22 * float(prev.get("size") or 8)):
+            words.append([ch])
+        else:
+            words[-1].append(ch)
+        prev = ch
+    return words
+
+
+def _typography(chars: list[dict], detail_chars: list[dict]) -> dict[str, Any]:
+    """Typeface family and point size, profiled across the page.
+
+    A forger retyping a field inside the same tool often keeps the typeface and
+    misses the point size by a fraction, which a font-name comparison never
+    sees.
+    """
+    rnd = lambda c: round(float(c.get("size") or 0), 1)  # noqa: E731
+    body = _tally(f"{font_family(c.get('fontname'))}@{rnd(c)}" for c in chars)
+    dom_font, _, dom_size = (body[0][0] if body else "@").partition("@")
+
+    figures = [
+        w for ln in _group_lines(chars) for w in _words(ln)
+        if RE_FIGURE.match("".join(c["text"] for c in w).strip())
+    ]
+    fig_profile = _tally(f"{font_family(ln[0].get('fontname'))}@{rnd(ln[0])}" for ln in figures)
+    fig_font, _, fig_size = (fig_profile[0][0] if fig_profile else "@").partition("@")
+
+    outliers = [
+        {"text": "".join(c["text"] for c in ln).strip(),
+         "font": font_family(ln[0].get("fontname")), "size": rnd(ln[0])}
+        for ln in figures
+        if font_family(ln[0].get("fontname")) != fig_font
+        or abs(rnd(ln[0]) - float(fig_size or 0)) > 0.2
+    ]
+    return {
+        "dominant_font": dom_font or None,
+        "dominant_size": float(dom_size) if dom_size else None,
+        "payment_detail_fonts": _tally(font_family(c.get("fontname")) for c in detail_chars),
+        "payment_detail_sizes": _tally(rnd(c) for c in detail_chars),
+        "figure_count": len(figures),
+        "dominant_figure_font": fig_font or None,
+        "dominant_figure_size": float(fig_size) if fig_size else None,
+        "figure_outliers": outliers,
+    }
+
+
 def _white(color: Any) -> bool:
     if color is None:
         return False
@@ -306,6 +381,17 @@ def _layout_facts(pdf: pdfplumber.PDF, visible_text: str) -> LayoutFacts:
             med = median(gaps)
             if med > 0:
                 facts.line_gap_anomaly = max(abs(g - med) / med for g in gaps)
+        # Profile every line of the block except its heading and trailing note.
+        # Selecting by label regex fails on exactly the documents that matter:
+        # pdfplumber yields characters, so a patched line interleaves into
+        # nonsense ("BBaannkk::") and stops matching the label it still shows.
+        detail_chars = [
+            c for ln in block_lines
+            for c in ln
+            if not PAYMENT_HEADING.search(_line_text(ln))
+            and not re.search(r"please use|payment reference", _line_text(ln), re.I)
+        ]
+        facts.typography = _typography(chars, detail_chars)
         for ln in block_lines:
             txt = _line_text(ln)
             for label in ("Account Name", "Bank", "BSB", "Account"):
@@ -316,6 +402,7 @@ def _layout_facts(pdf: pdfplumber.PDF, visible_text: str) -> LayoutFacts:
                     )
     else:
         facts.body_fonts = sorted({str(c.get("fontname", "")) for c in chars})
+        facts.typography = _typography(chars, [])
 
     # ---- every payment-looking token anywhere in the page objects --------
     joined = "\n".join(_line_text(ln) for ln in lines)

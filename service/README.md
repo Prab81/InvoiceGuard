@@ -10,7 +10,7 @@ For the project overview and the console, see the [top-level README](../README.m
 
 ```bash
 ./run.sh                               # http://127.0.0.1:8000
-./.venv/bin/python -m pytest tests -q  # 20 tests
+./.venv/bin/python -m pytest tests -q  # 30 tests
 ./.venv/bin/python samples/make_samples.py    # regenerate the corpus
 ./.venv/bin/python samples/seed_baseline.py   # reset the demo history
 ```
@@ -71,7 +71,10 @@ These do not infer tampering, they show it.
 | `FOR_HIDDEN_TEXT_UNDER_OVERLAY` | **critical** — the original account is still recoverable under the patch |
 | `FOR_INVISIBLE_TEXT` | white-on-white text left behind by a replaced field |
 | `FOR_OVERLAY_IN_PAYMENT_ZONE` | a shape or image drawn over the payment block |
-| `FOR_FONT_DRIFT_IN_PAYMENT_BLOCK` | a typeface used *only* in the block that matters |
+| `FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK` | the block mixes two typeface families - part of it was retyped |
+| `FOR_FONT_SIZE_DRIFT_IN_PAYMENT_BLOCK` | the block mixes two point sizes - the same trick, one the typeface check cannot see |
+| `FOR_TYPOGRAPHY_OUTLIER_IN_FIGURES` | an amount set differently from every other amount on the page |
+| `FOR_FONT_DRIFT_IN_PAYMENT_BLOCK` | the *whole* block is set in a typeface used nowhere else |
 | `FOR_INCREMENTAL_UPDATE` | multiple `%%EOF`/xref sections: the file was appended to after saving |
 | `FOR_TEXT_ALIGNMENT_ANOMALY` | irregular leading where a machine would hold it constant |
 | `FOR_PAGE_FLATTENED` | page rasterised to destroy the evidence an edit leaves |
@@ -186,7 +189,7 @@ review**, add a second PDF as **Known-good reference** for comparison mode, or
 click one of the bundled test documents.
 
 ```bash
-./.venv/bin/python -m pytest tests -q     # 20 tests
+./.venv/bin/python -m pytest tests -q     # 30 tests
 ./.venv/bin/python samples/make_samples.py   # regenerate the corpus
 ./.venv/bin/python samples/seed_baseline.py  # reset the demo history
 ```
