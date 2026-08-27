@@ -6,3 +6,6 @@ pdfplumber>=0.11
 # samples/make_samples.py only
 reportlab>=4.0
 pillow>=10.0
+
+# tests
+pytest>=8.0
