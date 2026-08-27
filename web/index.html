@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InvoiceGuard</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🛡️</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">IG</span>
+    <div>
+      <h1>InvoiceGuard</h1>
+      <p>Progress-claim invoice screening for construction lending</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span id="baselineStatus" class="pill pill-muted">baseline: loading…</span>
+    <button id="seedBtn" class="btn btn-ghost" type="button">Seed demo history</button>
+    <button id="clearBtn" class="btn btn-ghost" type="button">Clear</button>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel intake">
+    <h2>Screen an invoice</h2>
+    <p class="hint">
+      Upload the invoice presented for drawdown. Adding a known-good invoice from the
+      same supplier switches on the differential checks and works even when the bank
+      holds no history.
+    </p>
+
+    <div class="drop" id="dropSubject" data-role="subject" tabindex="0" role="button"
+         aria-label="Choose the invoice under review">
+      <input type="file" id="fileSubject" accept="application/pdf" hidden>
+      <div class="drop-label">Invoice under review</div>
+      <div class="drop-body"><span class="drop-cta">Drop a PDF or click to choose</span></div>
+    </div>
+
+    <div class="drop drop-optional" id="dropReference" data-role="reference" tabindex="0" role="button"
+         aria-label="Choose a known-good reference invoice">
+      <input type="file" id="fileReference" accept="application/pdf" hidden>
+      <div class="drop-label">Known-good reference <span class="opt">optional</span></div>
+      <div class="drop-body"><span class="drop-cta">Drop a PDF or click to choose</span></div>
+    </div>
+
+    <label class="field">
+      <span>Supplier name override</span>
+      <input type="text" id="supplierHint" placeholder="Only needed when the letterhead is an image">
+    </label>
+
+    <div class="actions">
+      <button id="analyzeBtn" class="btn btn-primary" type="button" disabled>Analyse</button>
+      <button id="acceptBtn" class="btn btn-ghost" type="button" disabled
+              title="Record this document as genuine and adopt its account as the verified baseline">
+        Mark verified &amp; learn
+      </button>
+    </div>
+
+    <div class="samples">
+      <h3>Bundled test documents</h3>
+      <div id="sampleList" class="sample-list"></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="results" id="results" aria-live="polite">
+    <div class="placeholder panel">
+      <h2>No document screened yet</h2>
+      <p>
+        Every finding is reported with the evidence behind it and the action it implies.
+        The score is a triage aid — the reason codes are the output that matters, because a
+        held drawdown has to be explainable to the customer, the broker and the ombudsman.
+      </p>
+      <ul class="layer-legend">
+        <li><b>Payment instrument</b> — where the money is actually going, measured against every account this supplier has been paid at before.</li>
+        <li><b>Document forensics</b> — patches over the payment block, recoverable original text, font drift, incremental saves.</li>
+        <li><b>File metadata</b> — the toolchain that produced the PDF, and what it stopped carrying.</li>
+        <li><b>Content &amp; business logic</b> — arithmetic, ABN, contacts, numbering, stage schedule.</li>
+        <li><b>Differential</b> — this document against a known-good one from the same supplier.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
