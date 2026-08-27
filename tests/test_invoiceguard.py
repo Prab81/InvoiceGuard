@@ -62,21 +62,21 @@ def codes(result: dict) -> set[str]:
 
 # --------------------------------------------------------------- reference
 def test_abn_checksum():
-    assert validate_abn("98 479 906 916")
+    assert validate_abn("53 173 584 802")
     assert not validate_abn("98 479 906 917")
     assert not validate_abn("1234")
 
 
 def test_bsb_registry_maps_both_case_accounts():
-    assert lookup_bsb("017 042").institution.startswith("Australia and New Zealand")
-    assert lookup_bsb("064-242").institution == "Commonwealth Bank of Australia"
+    assert lookup_bsb("013 006").institution.startswith("Australia and New Zealand")
+    assert lookup_bsb("062-000").institution == "Commonwealth Bank of Australia"
     assert not lookup_bsb("999-999").known
-    assert normalise_bsb("017042") == normalise_bsb("017 042") == "017042"
+    assert normalise_bsb("013006") == normalise_bsb("013 006") == "013006"
 
 
 def test_printed_bank_names_resolve_to_the_registry():
-    assert canonical_bank_name("ANZ") == lookup_bsb("017042").institution
-    assert canonical_bank_name("Commonwealth") == lookup_bsb("064242").institution
+    assert canonical_bank_name("ANZ") == lookup_bsb("013006").institution
+    assert canonical_bank_name("Commonwealth") == lookup_bsb("062000").institution
 
 
 def test_editor_fingerprints():
@@ -94,9 +94,9 @@ def test_date_parsing():
 # ---------------------------------------------------------------- extraction
 def test_authentic_fields_are_read():
     inv = extract(read(AUTHENTIC), AUTHENTIC)
-    assert inv.supplier_abn == "98 479 906 916"
-    assert inv.payment.bsb == "017042"
-    assert inv.payment.account_number == "475503373"
+    assert inv.supplier_abn == "53 173 584 802"
+    assert inv.payment.bsb == "013006"
+    assert inv.payment.account_number == "384920175"
     assert inv.payment.bank_printed == "ANZ"
     assert inv.invoice_number == "INV-101538"
     assert inv.invoice_date.isoformat() == "2025-11-05"
@@ -105,17 +105,17 @@ def test_authentic_fields_are_read():
 
 
 def test_abn_is_not_mistaken_for_a_bsb():
-    """'ABN 98 479 906 916' contains '479 906', which matches a bare BSB pattern."""
+    """'ABN 53 173 584 802' contains '479 906', which matches a bare BSB pattern."""
     inv = extract(read(AUTHENTIC), AUTHENTIC)
-    assert inv.layout.all_bsb_matches == ["017042"]
+    assert inv.layout.all_bsb_matches == ["013006"]
 
 
 def test_overlay_reveals_both_accounts():
     inv = extract(read(TAMPERED), TAMPERED)
-    assert set(inv.layout.all_bsb_matches) == {"017042", "064242"}
+    assert set(inv.layout.all_bsb_matches) == {"013006", "062000"}
     # The instrument reported is the one painted last - what a reader sees.
-    assert inv.payment.bsb == "064242"
-    assert inv.payment.account_number == "10118743"
+    assert inv.payment.bsb == "062000"
+    assert inv.payment.account_number == "10456213"
     assert inv.layout.covered_text_snippets, "original text under the patch was not recovered"
     assert inv.layout.overprint_ratio > 0.02
 
@@ -212,6 +212,6 @@ def test_observing_an_invoice_makes_its_account_the_baseline(empty_store):
     inv = extract(read(AUTHENTIC), AUTHENTIC)
     sup = empty_store.observe(inv, verified=True, note="call-back")
     assert sup.primary_account.verified
-    assert sup.primary_account.bsb == "017042"
+    assert sup.primary_account.bsb == "013006"
     reloaded = BaselineStore(empty_store.path)
-    assert reloaded.get_supplier(None, "98 479 906 916").primary_account.account_number == "475503373"
+    assert reloaded.get_supplier(None, "53 173 584 802").primary_account.account_number == "384920175"

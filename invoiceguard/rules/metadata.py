@@ -1,7 +1,7 @@
 """Layer 2 - document metadata.
 
 Nothing here is proof on its own: metadata is trivially editable, and honest
-suppliers do change software. Its value is corroborative and, in the Spiteri
+suppliers do change software. Its value is corroborative and, in the Harrowgate
 case, decisive - the genuine invoice was a first-generation export carrying its
 author and title, the forgery was an anonymous re-render at twice the size.
 """

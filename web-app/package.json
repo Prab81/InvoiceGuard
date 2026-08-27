@@ -1,0 +1,20 @@
+{
+  "name": "invoiceguard-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:single": "node scripts/inline-samples.mjs && vite build --config vite.single.config.js",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.js"
+  },
+  "devDependencies": {
+    "vite": "^7.1.5",
+    "vite-plugin-singlefile": "^2.3.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^5.4.149"
+  }
+}

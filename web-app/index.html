@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InvoiceGuard</title>
+<meta name="description" content="Screens a supplier invoice against known-good payment details and shows every rule that fired.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">IG</span>
+    <div>
+      <strong>InvoiceGuard</strong>
+      <span>Progress-claim invoice screening for construction lending</span>
+    </div>
+  </div>
+  <div class="topbar-meta">
+    <span class="pill pill-quiet" id="ruleCount">50 checks</span>
+    <span class="pill pill-quiet" title="Nothing you upload leaves this browser.">Runs entirely in your browser</span>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- ============================== INPUT ============================== -->
+  <form class="panel intake" id="intake" novalidate>
+    <ol class="steps">
+      <li class="step">
+        <div class="step-head"><span class="step-num">1</span><h2>Invoice under review</h2></div>
+        <div class="drop" id="dropSubject" tabindex="0" role="button" aria-label="Choose the invoice under review">
+          <input type="file" id="fileSubject" accept="application/pdf,.pdf" hidden>
+          <p class="drop-cta">Drop a PDF here, or click to choose</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <div class="step-head">
+          <span class="step-num">2</span>
+          <h2>Known-good details <span class="req">required</span></h2>
+        </div>
+        <p class="step-why">
+          A forged invoice can carry a valid ABN, a real BSB correctly paired with its bank, an exact
+          account-name match and perfect GST arithmetic. Nothing inside the page contradicts anything
+          else inside the page, so screening it alone finds nothing decisive.
+          <button type="button" class="linkish" id="whyToggle" aria-expanded="false">See the measured difference</button>
+        </p>
+        <div class="why-detail" id="whyDetail" hidden>
+          <table class="mini">
+            <thead><tr><th>Known-good input</th><th>Checks that run</th><th>Score on the bundled forgery</th></tr></thead>
+            <tbody>
+              <tr><td>Nothing</td><td class="num">27 of 50</td><td><span class="chip chip-review">28 · review only</span></td></tr>
+              <tr><td>Bank details typed in</td><td class="num">33–36 of 50</td><td><span class="chip chip-block">90 · block</span></td></tr>
+              <tr><td>A known-good invoice</td><td class="num">48 of 50</td><td><span class="chip chip-block">100 · block</span></td></tr>
+            </tbody>
+          </table>
+          <p>That is why this step is mandatory. Either form works; a reference invoice runs more checks.</p>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab is-active" role="tab" aria-selected="true" data-tab="reference">Known-good invoice</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="details">Enter bank details</button>
+        </div>
+
+        <div class="tabpane" data-pane="reference">
+          <div class="drop" id="dropReference" tabindex="0" role="button" aria-label="Choose a known-good reference invoice">
+            <input type="file" id="fileReference" accept="application/pdf,.pdf" hidden>
+            <p class="drop-cta">Drop a previous invoice you know is genuine</p>
+          </div>
+          <p class="fieldnote">Runs the full check set, including template, font and letterhead comparison.</p>
+        </div>
+
+        <div class="tabpane" data-pane="details" hidden>
+          <div class="grid2">
+            <label class="field"><span>Bank<i>required</i></span><input id="kgBank" placeholder="ANZ" autocomplete="off"></label>
+            <label class="field"><span>BSB<i>required</i></span><input id="kgBsb" placeholder="013 006" inputmode="numeric" autocomplete="off"></label>
+            <label class="field"><span>Account number<i>required</i></span><input id="kgAccount" placeholder="384920175" inputmode="numeric" autocomplete="off"></label>
+            <label class="field"><span>Account name</span><input id="kgAccountName" placeholder="Harrowgate Homes Pty Ltd" autocomplete="off"></label>
+            <label class="field"><span>Supplier ABN</span><input id="kgAbn" placeholder="53 173 584 802" autocomplete="off"></label>
+            <label class="field"><span>Builder licence</span><input id="kgLicence" placeholder="CC2074R" autocomplete="off"></label>
+            <label class="field"><span>Contact email</span><input id="kgEmail" type="email" placeholder="accounts@builder.com.au" autocomplete="off"></label>
+            <label class="field"><span>Contact phone</span><input id="kgPhone" placeholder="0491 570 110" autocomplete="off"></label>
+          </div>
+          <p class="fieldnote">Take these from the building contract or the bank's payee record — never from the invoice being screened.</p>
+        </div>
+      </li>
+    </ol>
+
+    <div class="actions">
+      <button type="submit" class="btn btn-primary" id="analyseBtn" disabled>Screen this invoice</button>
+      <button type="button" class="btn btn-quiet" id="resetBtn">Reset</button>
+    </div>
+    <p class="blocker" id="blocker"></p>
+
+    <section class="samples">
+      <h3>Try it with the bundled case</h3>
+      <p class="fieldnote">Two invoices from the same builder — one genuine, one forged, plus a cruder overlay tamper.</p>
+      <div id="sampleList" class="sample-list"></div>
+    </section>
+  </form>
+
+  <!-- ============================= RESULTS ============================= -->
+  <section class="results" id="results" aria-live="polite">
+    <div class="panel placeholder">
+      <h2>Nothing screened yet</h2>
+      <p>
+        Add the invoice and the known-good details, then screen. You get a verdict, every rule that
+        fired with the evidence behind it, and the full ledger of all 50 checks — including the ones
+        that could not run and why.
+      </p>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+<script type="module" src="/src/ui/main.js"></script>
+</body>
+</html>

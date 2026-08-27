@@ -3,15 +3,27 @@
 Screening for redirected and forged supplier invoices presented against
 construction loan drawdowns.
 
-Built around a real pair of documents: two invoices from the same Tasmanian
-builder, on the same letterhead, for the same job, addressed to the same
-borrowers. One is genuine. One pays a different bank.
+**Two parts.** [`web-app/`](web-app) is the reviewer's console — a browser-only
+MVP where you upload an invoice plus the known-good payment details and see the
+verdict and every rule that fired. `invoiceguard/` is the integration-grade
+Python service, which holds a supplier baseline across the whole loan book and
+is where the cross-payee mule-account check belongs. They share rule ids and
+weights and are tested against the same corpus.
+
+Both are built around the shape of a real redirection case: two invoices from
+the same builder, on the same letterhead, for the same job, addressed to the
+same borrowers. One is genuine. One pays a different bank.
+
+> **The bundled corpus is de-identified.** The builder, ABN, licence number,
+> contacts, borrowers and both account numbers are fictional; only the structure
+> of the case is real. Do not load a live customer's documents into a publicly
+> deployed instance.
 
 |                   | Genuine `INV-101538`         | Forged `INV-101544`   |
 |-------------------|------------------------------|-----------------------|
 | Bank              | ANZ                          | Commonwealth          |
-| BSB / account     | 017 042 / 475503373          | 064-242 / 10118743    |
-| Account name      | Spiteri Homes Pty Ltd        | Spiteri Homes Pty Ltd |
+| BSB / account     | 013 006 / 384920175          | 062-000 / 10456213    |
+| Account name      | Harrowgate Homes Pty Ltd        | Harrowgate Homes Pty Ltd |
 | PDF producer      | Microsoft: Print To PDF      | Pdftools SDK          |
 | PDF version       | 1.7                          | 1.4                   |
 | Title             | `Invoice INV-101538 (1).pdf` | *(absent)*            |
@@ -19,8 +31,8 @@ borrowers. One is genuine. One pays a different bank.
 | File size         | 269,474 bytes                | 570,435 bytes         |
 
 Everything a human reviewer normally checks passes on the forgery. The ABN
-`98 479 906 916` is a valid ABN — it satisfies the ATO modulus-89 checksum. BSB
-`064-242` is a real Commonwealth Bank BSB, correctly paired with the printed
+`53 173 584 802` is a valid ABN — it satisfies the ATO modulus-89 checksum. BSB
+`062-000` is a real Commonwealth Bank BSB, correctly paired with the printed
 bank name. The account name matches the builder exactly, so Confirmation of
 Payee would not have stopped it either. The GST arithmetic is exact. Nothing
 inside the document contradicts anything else inside the document.
@@ -82,8 +94,8 @@ read cleanly, and the one painted last — the one a human sees — is identifie
 content-stream position:
 
 ```
-[Helvetica]          Bank: ANZ  BSB: 017 042  Account: 475503373     <- hidden original
-[AAAAAA+DejaVuSans]  Bank: Commonwealth  BSB: 064-242  Account: 10118743   <- overlay
+[Helvetica]          Bank: ANZ  BSB: 013 006  Account: 384920175     <- hidden original
+[AAAAAA+DejaVuSans]  Bank: Commonwealth  BSB: 062-000  Account: 10456213   <- overlay
 ```
 
 ### 3. File metadata — *the toolchain, and what it stopped carrying*
@@ -101,7 +113,7 @@ print-to-PDF, macOS Quartz, iText, PDFtk) · `META_STRIPPED` ·
 `DOC_GST_MISMATCH` · `DOC_TOTAL_MISMATCH` · `DOC_AMOUNT_DUE_MISMATCH` ·
 `DOC_LINES_DONT_SUM` · `DOC_ABN_INVALID` (offline modulus-89) · `DOC_ABN_CHANGED` ·
 `DOC_LICENCE_CHANGED` · `DOC_LOOKALIKE_DOMAIN` (homoglyph + edit distance:
-`spiterihornes.com.au` vs `spiterihomes.com.au`) · `DOC_CONTACT_CHANGED` ·
+`harrowgatehornes.com.au` vs `harrowgatehomes.com.au`) · `DOC_CONTACT_CHANGED` ·
 `DOC_PHONE_CHANGED` · `DOC_DUPLICATE_NUMBER` · `DOC_SEQUENCE_REGRESSION` ·
 `DOC_SEQUENCE_VELOCITY_LOW` · `DOC_TERMS_SHORTENED` · `DOC_DUE_BEFORE_ISSUE` ·
 `DOC_STAGE_ALREADY_CLAIMED` · `DOC_STAGE_SKIPPED` · `DOC_URGENCY_LANGUAGE`
@@ -253,7 +265,7 @@ Stated plainly, because a fraud control that oversells itself is worse than none
    console. Screening should happen when the claim arrives, before a human has
    formed a view.
 3. **Confirmation of Payee on the new account, always** — but note what the
-   Spiteri case shows: the forger kept the account *name* identical, so a name
+   case above shows: the forger kept the account *name* identical, so a name
    check alone clears it. The control that works is a call-back to the number in
    the building contract, never a number on the invoice.
 4. **Feed analyst dispositions back as labels.** After a few thousand

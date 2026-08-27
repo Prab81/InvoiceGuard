@@ -1,4 +1,9 @@
-"""Generate a test corpus that reproduces the case this system was built for.
+"""Generate a test corpus that reproduces the shape of a real redirection case.
+
+All identifying detail is fictional: the builder, the ABN, the licence number,
+the contacts, the borrowers and both account numbers are invented. Only the
+structure is real - a genuine first-generation export against an anonymous
+re-render that pays a different bank.
 
 Four documents from the same fictitious builder:
 
@@ -81,7 +86,7 @@ def draw_invoice(c: canvas.Canvas, spec: dict, regular: str, bold: str, logo: Im
     c.drawImage(logo, 55, y - 52, 62, 62, mask="auto")
     c.setFont(bold, 21)
     c.setFillColor(NAVY)
-    c.drawString(128, y - 14, "SPITERI")
+    c.drawString(128, y - 14, "HARROWGATE")
     c.setFont(regular, 11)
     c.setFillColor(BLUE)
     c.drawString(130, y - 28, "H O M E S")
@@ -90,12 +95,12 @@ def draw_invoice(c: canvas.Canvas, spec: dict, regular: str, bold: str, logo: Im
     c.setFont(regular, 8.5)
     right = W - 55
     for i, line in enumerate([
-        "ABN 98 479 906 916",
-        "Licence No. CC1630M",
+        "ABN 53 173 584 802",
+        "Licence No. CC2074R",
         "",
-        "PO Box 133",
+        "PO Box 418",
         "Newstead Tas 7250",
-        "Ph 0418244872",
+        "Ph 0491 570 110",
         spec["email"],
     ]):
         c.drawRightString(right, y - 6 - i * 11, line)
@@ -107,8 +112,8 @@ def draw_invoice(c: canvas.Canvas, spec: dict, regular: str, bold: str, logo: Im
 
     top = y - 130
     c.setFont(regular, 9)
-    c.drawString(55, top, "Vicki Donald & Mark")
-    c.drawString(55, top - 12, "Shliebs")
+    c.drawString(55, top, "J Alderton & R")
+    c.drawString(55, top - 12, "Alderton")
 
     col = W - 200
     for i, (label, value) in enumerate([
@@ -131,8 +136,8 @@ def draw_invoice(c: canvas.Canvas, spec: dict, regular: str, bold: str, logo: Im
     c.line(55, ty - 5, right, ty - 5)
 
     c.setFont(regular, 8.5)
-    c.drawString(55, ty - 20, "Construction of new residential dwelling at 24")
-    c.drawString(55, ty - 31, "Westbury Pl, Deloraine")
+    c.drawString(55, ty - 20, "Construction of new residential dwelling at 18")
+    c.drawString(55, ty - 31, "Ferndale Rd, Westbury")
     c.drawString(55, ty - 46, spec["item"])
     c.drawRightString(400, ty - 46, spec["unit_price"])
     c.drawRightString(470, ty - 46, "10%")
@@ -203,11 +208,11 @@ def build_authentic(number: str, date_str: str, due: str, reference: str, item: 
     regular, bold = _fonts(embed=False)
     c = canvas.Canvas(str(path), pagesize=A4)
     draw_invoice(c, {
-        "email": "bjorn@spiterihomes.com.au", "date": date_str, "number": number,
+        "email": "accounts@harrowgatehomes.com.au", "date": date_str, "number": number,
         "reference": reference, "item": item, "unit_price": unit, "line_amount": subtotal,
         "subtotal": subtotal, "gst": gst, "total": total, "due": due,
-        "account_name": "Spiteri Homes Pty Ltd", "bank": "ANZ",
-        "bsb": "017 042", "account": "475503373",
+        "account_name": "Harrowgate Homes Pty Ltd", "bank": "ANZ",
+        "bsb": "013 006", "account": "384920175",
     }, regular, bold, _logo(120, 1, noisy=False))
     c.save()
     set_metadata(path, producer="Microsoft: Print To PDF", creator="Microsoft: Print To PDF",
@@ -221,13 +226,13 @@ def build_fraudulent() -> Path:
     regular, bold = _fonts(embed=True)
     c = canvas.Canvas(str(path), pagesize=A4)
     draw_invoice(c, {
-        "email": "bjorn@spiterihomes.com.au", "date": "10 Feb 2026", "number": "INV-101544",
+        "email": "accounts@harrowgatehomes.com.au", "date": "10 Feb 2026", "number": "INV-101544",
         "reference": "1132", "item": "Base stage", "unit_price": "43,181.8182",
         "line_amount": "43,181.82", "subtotal": "43,181.82", "gst": "4,318.18",
         "total": "47,500.00", "due": "24 Feb 2026",
-        "account_name": "Spiteri Homes Pty Ltd", "bank": "Commonwealth",
-        "bsb": "064-242", "account": "10118743",
-    }, regular, bold, _logo(600, 7, noisy=True))
+        "account_name": "Harrowgate Homes Pty Ltd", "bank": "Commonwealth",
+        "bsb": "062-000", "account": "10456213",
+    }, regular, bold, _logo(260, 7, noisy=True))
     c.save()
     set_metadata(path, producer="Pdftools SDK", creator="", title=None, author=None,
                  created="D:20260209231900+11'00'", modified="D:20260209232400+11'00'",
@@ -243,12 +248,12 @@ def build_tampered() -> Path:
     patch_font, _ = _fonts(embed=True)
     c = canvas.Canvas(str(path), pagesize=A4)
     geom = draw_invoice(c, {
-        "email": "bjorn@spiterihomes.com.au", "date": "08 Jan 2026", "number": "INV-101541",
+        "email": "accounts@harrowgatehomes.com.au", "date": "08 Jan 2026", "number": "INV-101541",
         "reference": "1132", "item": "Frame stage", "unit_price": "28,863.6364",
         "line_amount": "28,863.64", "subtotal": "28,863.64", "gst": "2,886.36",
         "total": "31,750.00", "due": "22 Jan 2026",
-        "account_name": "Spiteri Homes Pty Ltd", "bank": "ANZ",
-        "bsb": "017 042", "account": "475503373",
+        "account_name": "Harrowgate Homes Pty Ltd", "bank": "ANZ",
+        "bsb": "013 006", "account": "384920175",
     }, regular, bold, _logo(120, 1, noisy=False))
 
     ys = geom["payment_y"]
@@ -260,8 +265,8 @@ def build_tampered() -> Path:
     c.setFillColor(NAVY)
     c.setFont(patch_font, 8.5)
     c.drawString(55, ys["Bank"], "Bank: Commonwealth")
-    c.drawString(55, ys["BSB"], "BSB: 064-242")
-    c.drawString(55, ys["Account"], "Account: 10118743")
+    c.drawString(55, ys["BSB"], "BSB: 062-000")
+    c.drawString(55, ys["Account"], "Account: 10456213")
     c.save()
     set_metadata(path, producer="iLovePDF", creator="Microsoft: Print To PDF",
                  title=None, author=None, created="D:20260107091200+11'00'",

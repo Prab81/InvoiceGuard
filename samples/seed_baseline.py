@@ -32,7 +32,7 @@ def main(reset: bool = True) -> None:
         inv = extract(path.read_bytes(), name)
         sup = store.observe(inv, verified=note is not None, note=note)
         print(f"seeded {name} -> {sup.name} ({sup.invoice_count} invoice(s) on file)")
-    primary = store.get_supplier(None, "98 479 906 916").primary_account
+    primary = store.get_supplier(None, "53 173 584 802").primary_account
     print(f"verified account on file: {primary.bsb} / {primary.account_number} ({primary.bank})")
 
 

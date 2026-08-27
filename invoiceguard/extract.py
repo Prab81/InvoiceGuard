@@ -171,7 +171,7 @@ def _group_lines(chars: list[dict], tol: float = 2.0) -> list[list[dict]]:
 def _line_text(line: list[dict]) -> str:
     """Concatenate a line's glyphs, restoring the word gaps the PDF only implies.
 
-    Without this, positionally separated runs fuse ("SPITERIABN 98 479 906 916")
+    Without this, positionally separated runs fuse ("HARROWGATEABN 53 173 584 802")
     and every word-boundary-anchored pattern silently stops matching.
     """
     out: list[str] = []
@@ -186,12 +186,20 @@ def _line_text(line: list[dict]) -> str:
     return "".join(out)
 
 
+# Digit runs that are emphatically not bank accounts. An ABN prints as 3-3-3 and
+# an Australian mobile as 04xx xxx xxx; both contain a perfect BSB-shaped
+# substring, so they must be removed before any bare-pattern scan.
 RE_IDENTITY_RUN = re.compile(r"\b(?:ABN|ACN|ARBN)[:\s]*(?:\d[ \-]?){8,12}", re.I)
+RE_CONTACT_RUN = re.compile(
+    r"\b(?:Ph|Phone|Tel|Telephone|Mob(?:ile)?|Fax)[:.\s]*(?:\+?61[\s-]?)?[\d][\d\s\-()]{6,}", re.I)
+RE_MOBILE_RUN = re.compile(r"\b(?:\+?61[\s-]?)?0?4\d{2}[\s-]?\d{3}[\s-]?\d{3}\b")
 
 
 def _strip_identity_numbers(text: str) -> str:
-    """ABNs are printed in 3-3-3 groups and otherwise look exactly like a BSB."""
-    return RE_IDENTITY_RUN.sub(" ", text)
+    """Remove digit runs that mimic a BSB but cannot be one."""
+    for pattern in (RE_IDENTITY_RUN, RE_CONTACT_RUN, RE_MOBILE_RUN):
+        text = pattern.sub(" ", text)
+    return text
 
 
 def _text_layers(chars: list[dict]) -> list[dict]:
