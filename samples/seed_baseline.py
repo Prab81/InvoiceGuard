@@ -27,13 +27,16 @@ def main(reset: bool = True) -> None:
     for name, note in [
         ("authentic_INV-101538.pdf", "Account confirmed by call-back to the number in the building contract, 06 Nov 2025."),
         ("authentic_INV-101540.pdf", None),
+        ("authentic_INV-2291.pdf", "Account confirmed by call-back, 15 Jan 2026."),
     ]:
         path = ROOT / name
         inv = extract(path.read_bytes(), name)
         sup = store.observe(inv, verified=note is not None, note=note)
         print(f"seeded {name} -> {sup.name} ({sup.invoice_count} invoice(s) on file)")
-    primary = store.get_supplier(None, "53 173 584 802").primary_account
-    print(f"verified account on file: {primary.bsb} / {primary.account_number} ({primary.bank})")
+    for abn in ("53 173 584 802", "86 131 549 265"):
+        sup = store.get_supplier(None, abn)
+        primary = sup.primary_account
+        print(f"{sup.name}: verified account {primary.bsb} / {primary.account_number} ({primary.bank})")
 
 
 if __name__ == "__main__":

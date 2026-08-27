@@ -13,6 +13,8 @@ const wanted = [
   'authentic_INV-101551.pdf',
   'fraudulent_INV-101544.pdf',
   'tampered_INV-101541.pdf',
+  'authentic_INV-2291.pdf',
+  'fraudulent_INV-2304.pdf',
 ];
 
 const entries = wanted.map((name) => {

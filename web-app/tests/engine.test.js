@@ -34,6 +34,8 @@ before(async () => {
   docs.genuineNew = await load('authentic_INV-101551.pdf');
   docs.forged = await load('fraudulent_INV-101544.pdf');
   docs.tampered = await load('tampered_INV-101541.pdf');
+  docs.cwGenuine = await load('authentic_INV-2291.pdf');
+  docs.cwForged = await load('fraudulent_INV-2304.pdf');
 });
 
 const firedIds = (r) => r.ledger.filter((e) => e.status === 'triggered').map((e) => e.id);
@@ -208,4 +210,45 @@ test('a non-PDF is reported, not thrown', async () => {
   assert.ok(d.warnings.length);
   const r = analyze({ subject: d, details: KNOWN_GOOD_DETAILS });
   assert.equal(r.ledger.length, RULES.length);
+});
+
+
+/* ------------------------------------------- second case: email compromise */
+test('the email-compromise forgery fires the channel rules the first case never touches', () => {
+  const r = analyze({ subject: docs.cwForged, reference: docs.cwGenuine });
+  assert.equal(r.risk.band, 'high_risk');
+  const fired = firedIds(r);
+  for (const id of ['PAY_ACCOUNT_CHANGED', 'DOC_LOOKALIKE_DOMAIN', 'DOC_PHONE_CHANGED',
+                    'DOC_TERMS_SHORTENED', 'DOC_URGENCY_LANGUAGE']) {
+    assert.ok(fired.includes(id), `${id} did not fire`);
+  }
+});
+
+test('an announced bank change suppresses the silent-change finding but not the block', () => {
+  // The forgery politely says "our banking details have changed", which is what
+  // a real supplier-email compromise does. The account-change rule must still
+  // fire; only the silent-change corroboration should stand down.
+  const r = analyze({ subject: docs.cwForged, reference: docs.cwGenuine });
+  const fired = firedIds(r);
+  assert.ok(fired.includes('PAY_ACCOUNT_CHANGED'));
+  assert.ok(!fired.includes('PAY_ACCOUNT_CHANGED_SILENTLY'));
+  assert.equal(r.risk.band, 'high_risk');
+});
+
+test('the second case is a different supplier with its own valid ABN', () => {
+  assert.equal(docs.cwGenuine.supplierName, 'Calderwood Constructions Pty Ltd');
+  assert.ok(validateAbn(docs.cwGenuine.supplierAbn));
+  assert.notEqual(docs.cwGenuine.supplierAbn, docs.genuine.supplierAbn);
+  assert.notEqual(docs.cwGenuine.payment.bsb, docs.genuine.payment.bsb);
+});
+
+test('the genuine second-case invoice is clean against its own known good', () => {
+  const r = analyze({ subject: docs.cwGenuine, reference: docs.cwGenuine });
+  assert.equal(r.risk.band, 'likely_authentic');
+  assert.equal(r.risk.score, 0);
+});
+
+test('comparing across the two unrelated suppliers is flagged, not scored', () => {
+  const r = analyze({ subject: docs.cwForged, reference: docs.genuine });
+  assert.ok(r.notices.some((n) => /not look like the same supplier/.test(n.text)));
 });

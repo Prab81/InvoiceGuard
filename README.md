@@ -42,6 +42,29 @@ detectable against something outside itself** — the supplier's payment history
 the supplier's previous documents, or the file's own structure. So the engine
 runs five layers, and weights the ones a fraudster cannot control the highest.
 
+
+### A second, independent case
+
+The corpus carries two unrelated builders, because the two fraud shapes look
+nothing alike.
+
+**Harrowgate Homes** — the forger controls the document only. The invoice is
+internally perfect; only the destination account and the file's own structure
+give it away.
+
+**Calderwood Constructions** — the attacker also controls the email channel,
+which is what supplier-email compromise actually looks like. The forged invoice
+carries a reply domain one homoglyph from the real one
+(`calderwoodconstructlons.com.au`), the attacker's callback number, terms
+compressed from 14 days to 3, urgency wording, and a polite notice announcing
+the "new" bank details.
+
+That second case fires four rules the first never touches — `DOC_LOOKALIKE_DOMAIN`,
+`DOC_PHONE_CHANGED`, `DOC_TERMS_SHORTENED`, `DOC_URGENCY_LANGUAGE` — and
+demonstrates the model's precision from the other side: because the change *is*
+announced, `PAY_ACCOUNT_CHANGED_SILENTLY` correctly stands down while the
+account change still blocks the drawdown.
+
 ---
 
 ## The five layers

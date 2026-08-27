@@ -36,6 +36,13 @@ because the original account is still recoverable underneath the patch. That
 is the difference between a forgery and a tamper, and the console reports it
 as such.
 
+## Two bundled cases
+
+`Harrowgate Homes` — the forger controls the document only.
+`Calderwood Constructions` — the attacker also controls the email channel:
+a look-alike reply domain, a changed callback number, 3-day terms and urgency
+wording, which between them fire four rules the first case never touches.
+
 ## The rule ledger
 
 The console shows all 50 checks, not just the ones that fired:

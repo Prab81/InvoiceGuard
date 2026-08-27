@@ -26,6 +26,8 @@ from invoiceguard.scoring import score  # noqa: E402
 AUTHENTIC = "authentic_INV-101538.pdf"
 AUTHENTIC_2 = "authentic_INV-101540.pdf"
 UNSEEN_GENUINE = "authentic_INV-101551.pdf"
+CW_GENUINE = "authentic_INV-2291.pdf"
+CW_FORGED = "fraudulent_INV-2304.pdf"
 FRAUD = "fraudulent_INV-101544.pdf"
 TAMPERED = "tampered_INV-101541.pdf"
 
@@ -215,3 +217,34 @@ def test_observing_an_invoice_makes_its_account_the_baseline(empty_store):
     assert sup.primary_account.bsb == "013006"
     reloaded = BaselineStore(empty_store.path)
     assert reloaded.get_supplier(None, "53 173 584 802").primary_account.account_number == "384920175"
+
+
+# --------------------------------------------------- second case: email compromise
+def test_second_case_is_an_independent_supplier(store):
+    """The corpus carries two unrelated builders, so a baseline for one says
+    nothing about the other."""
+    genuine = extract(read(CW_GENUINE), CW_GENUINE)
+    assert genuine.supplier_name == "Calderwood Constructions Pty Ltd"
+    assert genuine.supplier_abn == "86 131 549 265"
+    assert genuine.payment.bsb == "083004"
+    assert store.get_supplier(genuine.supplier_name, genuine.supplier_abn) is None
+
+
+def test_email_compromise_forgery_is_blocked_against_its_own_baseline(store):
+    store.observe(extract(read(CW_GENUINE), CW_GENUINE), verified=True, note="call-back 15 Jan 2026")
+    result = analyze_single(read(CW_FORGED), CW_FORGED, store)
+    assert result["risk"]["band"] == "high_risk"
+    found = codes(result)
+    assert "PAY_ACCOUNT_CHANGED" in found
+    assert "DOC_LOOKALIKE_DOMAIN" in found
+    assert "DOC_PHONE_CHANGED" in found
+    # The forgery announces the change, so the silent-change corroboration
+    # must stand down while the account change still blocks.
+    assert "PAY_ACCOUNT_CHANGED_SILENTLY" not in found
+
+
+def test_the_two_cases_do_not_share_an_account(store):
+    a = extract(read(AUTHENTIC), AUTHENTIC)
+    b = extract(read(CW_GENUINE), CW_GENUINE)
+    assert a.payment.key != b.payment.key
+    assert not store.suppliers_for_account(b.payment.bsb, b.payment.account_number)

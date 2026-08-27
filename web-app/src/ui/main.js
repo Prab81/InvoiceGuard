@@ -26,9 +26,21 @@ const $ = (s) => document.querySelector(s);
 const state = { subject: null, reference: null, mode: 'reference', last: null, filter: 'all' };
 
 const SAMPLES = [
-  { file: 'fraudulent_INV-101544.pdf', name: 'Forged invoice', note: 'Re-rendered, pays a Commonwealth account', ref: 'authentic_INV-101538.pdf' },
-  { file: 'tampered_INV-101541.pdf', name: 'Tampered invoice', note: 'Patch pasted over the payment block', ref: 'authentic_INV-101538.pdf' },
-  { file: 'authentic_INV-101551.pdf', name: 'Genuine invoice', note: 'Never seen before — should come back clean', ref: 'authentic_INV-101538.pdf' },
+  { case: 'Harrowgate Homes — the forger controls the document',
+    file: 'fraudulent_INV-101544.pdf', ref: 'authentic_INV-101538.pdf',
+    name: 'Forged invoice', note: 'Re-rendered anonymously, pays a Commonwealth account' },
+  { case: 'Harrowgate Homes — the forger controls the document',
+    file: 'tampered_INV-101541.pdf', ref: 'authentic_INV-101538.pdf',
+    name: 'Tampered invoice', note: 'White patch pasted over the payment block' },
+  { case: 'Harrowgate Homes — the forger controls the document',
+    file: 'authentic_INV-101551.pdf', ref: 'authentic_INV-101538.pdf',
+    name: 'Genuine invoice', note: 'Never seen before — should come back clean' },
+  { case: 'Calderwood Constructions — the attacker also controls the email',
+    file: 'fraudulent_INV-2304.pdf', ref: 'authentic_INV-2291.pdf',
+    name: 'Email-compromise forgery', note: 'Look-alike reply domain, new bank, 3-day terms, urgency' },
+  { case: 'Calderwood Constructions — the attacker also controls the email',
+    file: 'authentic_INV-2291.pdf', ref: 'authentic_INV-2291.pdf',
+    name: 'Genuine invoice', note: 'The known-good original for this case' },
 ];
 
 /* ------------------------------------------------------------- helpers */
@@ -459,7 +471,15 @@ $('#resetBtn').addEventListener('click', () => {
 });
 
 const list = $('#sampleList');
+let lastCase = null;
 SAMPLES.forEach((s) => {
+  if (s.case !== lastCase) {
+    lastCase = s.case;
+    const head = document.createElement('p');
+    head.className = 'sample-case';
+    head.textContent = s.case;
+    list.appendChild(head);
+  }
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'sample';
