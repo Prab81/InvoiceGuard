@@ -4,7 +4,12 @@ import './styles.css';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { extract, setPdfjs } from '../engine/extract.js';
 import { analyze } from '../engine/analyze.js';
-import { RULES } from '../engine/catalog.js';
+import { allRules, loadPolicy } from '../engine/policy.js';
+import { buildReport } from '../report/model.js';
+import { buildDocx } from '../report/docx.js';
+import { buildPdf } from '../report/pdf.js';
+import { MIME, inSandboxedFrame, saveFile } from './export.js';
+import { createSettings } from './settings.js';
 
 /* global __SINGLE_FILE__ */
 const SINGLE_FILE = __SINGLE_FILE__;
@@ -23,7 +28,13 @@ const pdfReady = SINGLE_FILE
     });
 
 const $ = (s) => document.querySelector(s);
-const state = { subject: null, reference: null, mode: 'reference', last: null, filter: 'all' };
+const state = {
+  subject: null, reference: null, mode: 'reference', last: null, filter: 'all',
+  policy: loadPolicy(),
+  // The parsed documents are kept so a policy change can be re-scored
+  // without re-reading the PDFs.
+  lastInput: null,
+};
 
 const SAMPLES = [
   { case: 'Harrowgate Homes — the forger controls the document',
@@ -146,7 +157,7 @@ async function screen() {
     } else {
       details = typedDetails();
     }
-    render(analyze({ subject, reference, details }));
+    runAnalysis({ subject, reference, details });
   } catch (err) {
     console.error(err);
     toast(`Could not screen that file: ${err.message}`);
@@ -172,12 +183,40 @@ async function screenSample(sample) {
     await pdfReady;
     const subject = await extract(await grab(sample.file), sample.file);
     const reference = await extract(await grab(sample.ref), sample.ref);
-    render(analyze({ subject, reference }));
+    runAnalysis({ subject, reference });
   } catch (err) {
     toast(err.message);
   } finally {
     btn.textContent = 'Screen this invoice';
     refresh();
+  }
+}
+
+function runAnalysis(input) {
+  state.lastInput = input;
+  render(analyze({ ...input, policy: state.policy }));
+}
+
+/** Re-score the document already on screen against the edited policy. */
+function rescore() {
+  if (!state.lastInput) return;
+  runAnalysis(state.lastInput);
+}
+
+/* ------------------------------------------------------------- exporting */
+function exportReport(kind) {
+  if (!state.last) { toast('Screen an invoice first.'); return; }
+  try {
+    const report = buildReport(state.last);
+    const bytes = kind === 'docx' ? buildDocx(report) : buildPdf(report);
+    const name = `${report.filenameStem}-screening-report.${kind}`;
+    saveFile(bytes, name, MIME[kind]);
+    toast(inSandboxedFrame
+      ? `${name} generated. If nothing downloaded, this preview blocks downloads — use the deployed app.`
+      : `${name} downloaded.`);
+  } catch (err) {
+    console.error(err);
+    toast(`Could not build the ${kind.toUpperCase()}: ${err.message}`);
   }
 }
 
@@ -382,6 +421,11 @@ function render(result) {
         </div>
       </div>
       <div class="layers">${layerRows || '<p class="fieldnote">No layer scored above zero.</p>'}</div>
+      <div class="export-bar">
+        <span class="fieldnote">Save this assessment</span>
+        <button type="button" class="btn btn-quiet" data-export="docx">Download Word</button>
+        <button type="button" class="btn btn-quiet" data-export="pdf">Download PDF</button>
+      </div>
     </section>
 
     ${notices.map((n) => `<div class="notice notice-${n.kind}">${esc(n.text)}</div>`).join('')}
@@ -418,6 +462,9 @@ function render(result) {
     ${subject.warnings.length ? `<div class="notice notice-info">${subject.warnings.map(esc).join(' ')}</div>` : ''}
   `;
 
+  document.querySelectorAll('[data-export]').forEach((btn) => {
+    btn.addEventListener('click', () => exportReport(btn.dataset.export));
+  });
   document.querySelectorAll('.filter').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.filter === state.filter);
     btn.addEventListener('click', () => {
@@ -491,5 +538,21 @@ SAMPLES.forEach((s) => {
   list.appendChild(btn);
 });
 
-$('#ruleCount').textContent = `${RULES.length} checks`;
+const settings = createSettings({
+  getPolicy: () => state.policy,
+  setPolicy: (p) => { state.policy = p; refreshRuleCount(); },
+  onChange: rescore,
+  toast,
+});
+$('#settingsBtn').addEventListener('click', () => settings.open());
+
+function refreshRuleCount() {
+  const rules = allRules(state.policy);
+  const on = rules.filter((r) => r.enabled).length;
+  $('#ruleCount').textContent = on === rules.length
+    ? `${rules.length} checks`
+    : `${on} of ${rules.length} checks on`;
+  $('#ruleCount').classList.toggle('pill-warn', on !== rules.length);
+}
+refreshRuleCount();
 refresh();

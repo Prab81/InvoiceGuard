@@ -111,6 +111,55 @@ one it found.
 
 ---
 
+## Exporting an assessment
+
+Every screening can be saved as **Word (.docx)** or **PDF** from the verdict
+panel. Both are generated in the browser from one shared report model, so the
+two exports of the same assessment can never disagree. The report carries the
+verdict, every rule that fired with its evidence and action, the attribute
+comparison, the full ledger, both documents' details — and a **Policy in force**
+section that states plainly whether the shipped rule set was used unchanged, or
+names every check that was switched off, retuned or added.
+
+> Some sandboxed preview hosts silently drop downloads a page starts itself.
+> On a normal deployment both buttons download; in a sandboxed preview the app
+> says so rather than letting the file appear to vanish.
+
+---
+
+## Settings: tuning the policy
+
+The **Settings** panel lists all 53 checks grouped by layer. For each one you can:
+
+* switch it **on or off** — a disabled check is dropped from the ledger and scores nothing
+* change its **severity** and **weight**
+* and, at the top, move the **band thresholds** and **layer caps**
+
+Changes apply to the assessment already on screen immediately — no re-upload —
+so you can watch the score move as you tune. The policy is saved in the browser
+and can be **exported and imported as JSON**, which is what makes it reviewable
+and version-controllable rather than a setting someone changed once.
+
+### Adding your own checks
+
+Custom checks are **declarative, not code**: pick a field, a comparison and a
+value. That is a deliberate limit — letting a reviewer type JavaScript into a
+fraud tool would be a security hole, and it could not run under the page's
+content-security policy anyway.
+
+29 fields are exposed (payment instrument, supplier identity, invoice content,
+file metadata, page structure) with 13 comparisons including
+`differs from the known good`, `matches the pattern` and `is one of`. Between
+them they express most policy-style rules — approved producer lists, ABN
+allowlists, terms floors, size ceilings.
+
+**What still needs engine work:** anything requiring *new evidence* from the
+page rather than a new comparison of evidence already extracted — a new overlay
+heuristic, a different typography profile, a new forensic signal. Those are
+additions to `src/engine/extract.js` and `catalog.js`, not settings.
+
+---
+
 ## Typography checks
 
 A forger who retypes a field inside the page's own tool keeps the typeface and
@@ -138,7 +187,7 @@ check, so a single edit is never counted twice.
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm test         # 33 engine tests
+npm test         # 45 engine tests
 npm run build    # -> dist/
 ```
 

@@ -23,23 +23,29 @@ export const BANDS = [
     decision: 'Nothing inconsistent was found. Normal payment controls still apply.' },
 ];
 
-export function score(findings, { hasKnownGood, parseWarnings = 0 }) {
+export function score(findings, { hasKnownGood, parseWarnings = 0, caps = null, bands = null }) {
+  const layerCaps = caps || Object.fromEntries(Object.entries(LAYERS).map(([k, v]) => [k, v.cap]));
+  const bandTable = bands || BANDS;
   const raw = {};
   for (const f of findings) raw[f.layer] = (raw[f.layer] || 0) + f.weight;
 
   const layerScores = {};
   for (const [layer, value] of Object.entries(raw)) {
-    layerScores[layer] = Math.max(-15, Math.min(value, LAYERS[layer]?.cap ?? 30));
+    layerScores[layer] = Math.max(-15, Math.min(value, layerCaps[layer] ?? 30));
   }
   let total = Math.max(0, Math.min(100, Object.values(layerScores).reduce((a, b) => a + b, 0)));
 
   const worst = findings
     .filter((f) => f.weight > 0)
     .reduce((max, f) => Math.max(max, SEVERITY_RANK[f.severity]), 0);
-  if (worst >= 4) total = Math.max(total, 78);
-  else if (worst === 3) total = Math.max(total, 42);
+  // A critical finding is categorical: it lands in the top band whatever the
+  // arithmetic said, and it follows the threshold if the policy moved it.
+  const topBand = bandTable[0];
+  const reviewBand = bandTable[bandTable.length - 2] || topBand;
+  if (worst >= 4) total = Math.max(total, topBand.min + 3);
+  else if (worst === 3) total = Math.max(total, reviewBand.min);
 
-  const band = BANDS.find((b) => total >= b.min) || BANDS[BANDS.length - 1];
+  const band = bandTable.find((b) => total >= b.min) || bandTable[bandTable.length - 1];
 
   const confidence = !hasKnownGood
     ? { level: 'limited', text: 'Limited - no known-good details, so the account-change check could not run.' }

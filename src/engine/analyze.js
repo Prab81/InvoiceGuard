@@ -1,7 +1,8 @@
 // Orchestration: a PDF plus whatever is known to be good, in; a verdict and a
 // full rule ledger, out.
 
-import { RULES, LAYERS } from './catalog.js';
+import { LAYERS } from './catalog.js';
+import { activeRules, bandsFor, capsFor, defaultPolicy, normalisePolicy } from './policy.js';
 import { classifyStage, normaliseBsb } from './reference.js';
 import { daysBetween } from './extract.js';
 import { score, SEVERITY_RANK } from './scoring.js';
@@ -84,16 +85,17 @@ export function hasAnyKnownGood(kg) {
  * Run every rule in the catalogue and report each one's status.
  * A rule is `triggered`, `clear`, or `skipped` with the reason it could not run.
  */
-export function runRules(ctx) {
+export function runRules(ctx, rules) {
   const ledger = [];
   const findings = [];
-  for (const rule of RULES) {
+  for (const rule of rules) {
     const entry = {
       id: rule.id,
       title: rule.title,
       parameter: rule.parameter,
       layer: rule.layer,
-      layerLabel: LAYERS[rule.layer].label,
+      layerLabel: LAYERS[rule.layer]?.label || rule.layer,
+      custom: Boolean(rule.custom),
       severity: rule.severity,
       weight: rule.weight,
       polarity: rule.polarity || 'risk',
@@ -236,7 +238,8 @@ export function buildDiff(subject, reference) {
  * @param {object|null} reference  extracted known-good invoice, if supplied
  * @param {object|null} details    known-good details typed in, if supplied
  */
-export function analyze({ subject, reference = null, details = null }) {
+export function analyze({ subject, reference = null, details = null, policy = null }) {
+  const activePolicy = normalisePolicy(policy || defaultPolicy());
   let knownGood = null;
   if (reference) {
     knownGood = knownGoodFromReference(reference);
@@ -246,10 +249,12 @@ export function analyze({ subject, reference = null, details = null }) {
   }
 
   const ctx = { doc: subject, ref: reference, knownGood, hasKnownGood: Boolean(knownGood) };
-  const { ledger, findings } = runRules(ctx);
+  const { ledger, findings } = runRules(ctx, activeRules(activePolicy));
   const risk = score(findings, {
     hasKnownGood: Boolean(knownGood?.accounts?.length),
     parseWarnings: subject.warnings.length,
+    caps: capsFor(activePolicy),
+    bands: bandsFor(activePolicy),
   });
 
   const coverage = {
@@ -295,6 +300,7 @@ export function analyze({ subject, reference = null, details = null }) {
 
   return {
     risk,
+    policy: activePolicy,
     ledger,
     coverage,
     notices,

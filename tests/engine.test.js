@@ -14,6 +14,13 @@ import { extract, setPdfjs, parseDate, fontFamily } from '../src/engine/extract.
 import { analyze, knownGoodFromDetails, knownGoodFromReference } from '../src/engine/analyze.js';
 import { RULES } from '../src/engine/catalog.js';
 import { score } from '../src/engine/scoring.js';
+import {
+  activeRules, allRules, compileCustomRule, defaultPolicy, describeCustomRule,
+  normalisePolicy, policyIsCustomised,
+} from '../src/engine/policy.js';
+import { buildReport } from '../src/report/model.js';
+import { buildDocx } from '../src/report/docx.js';
+import { buildPdf } from '../src/report/pdf.js';
 import { lookupBsb, validateAbn, canonicalBankName, matchEditorFingerprint } from '../src/engine/reference.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -299,4 +306,142 @@ test('the two payment-block font rules never both fire', () => {
       && fired.includes('FOR_FONT_FAMILY_DRIFT_IN_PAYMENT_BLOCK');
     assert.ok(!both, `${doc.filename} double-counted the block font finding`);
   }
+});
+
+
+/* ---------------------------------------------------------------- policy */
+test('the shipped policy runs every catalogued rule', () => {
+  const p = defaultPolicy();
+  assert.equal(activeRules(p).length, RULES.length);
+  assert.equal(policyIsCustomised(p), false);
+});
+
+test('disabling rules lowers the score and shrinks the ledger', () => {
+  const base = analyze({ subject: docs.forged, reference: docs.genuine });
+  const policy = defaultPolicy();
+  policy.disabled = ['PAY_ACCOUNT_CHANGED', 'PAY_ACCOUNT_CHANGED_SILENTLY', 'PAY_BANK_CHANGED'];
+  const tuned = analyze({ subject: docs.forged, reference: docs.genuine, policy });
+
+  assert.ok(tuned.risk.score < base.risk.score, 'score did not move');
+  assert.equal(tuned.ledger.length, base.ledger.length - 3);
+  assert.ok(!firedIds(tuned).includes('PAY_ACCOUNT_CHANGED'));
+  assert.ok(policyIsCustomised(policy));
+});
+
+test('a weight override changes the contribution', () => {
+  const policy = defaultPolicy();
+  policy.overrides = { META_EDITOR_FINGERPRINT: { weight: 1, severity: 'low' } };
+  const r = analyze({ subject: docs.forged, reference: docs.genuine, policy });
+  const hit = r.ledger.find((e) => e.id === 'META_EDITOR_FINGERPRINT');
+  assert.equal(hit.weight, 1);
+  assert.equal(hit.severity, 'low');
+});
+
+test('moving the block threshold moves the band', () => {
+  const policy = defaultPolicy();
+  policy.thresholds.high_risk = 99;
+  policy.thresholds.suspicious = 95;
+  const lenient = analyze({ subject: docs.tampered, policy });
+  assert.ok(['high_risk', 'suspicious'].includes(lenient.risk.band));
+  policy.thresholds.high_risk = 5;
+  const strict = analyze({ subject: docs.genuineNew, reference: docs.genuine, policy });
+  assert.equal(strict.risk.score, 0, 'a clean document must still score zero');
+});
+
+test('a custom rule is compiled, runs, and explains itself', () => {
+  const def = {
+    id: 'CUSTOM_TEST', title: 'Producer must be the accounting system',
+    layer: 'metadata', severity: 'critical', weight: 30,
+    field: 'meta.producer', operator: 'notContains', value: 'Print To PDF',
+  };
+  assert.equal(describeCustomRule(def), 'PDF producer does not contain "Print To PDF"');
+
+  const policy = defaultPolicy();
+  policy.custom = [def];
+  const r = analyze({ subject: docs.forged, reference: docs.genuine, policy });
+  const hit = r.ledger.find((e) => e.id === 'CUSTOM_TEST');
+  assert.equal(hit.status, 'triggered');
+  assert.equal(hit.custom, true);
+  assert.match(hit.evidence, /Pdftools SDK/);
+
+  // ... and stays quiet on a document that satisfies it.
+  const clean = analyze({ subject: docs.genuineNew, reference: docs.genuine, policy });
+  assert.equal(clean.ledger.find((e) => e.id === 'CUSTOM_TEST').status, 'clear');
+});
+
+test('a custom rule needing known-good input reports why it could not run', () => {
+  const policy = defaultPolicy();
+  policy.custom = [{
+    id: 'CUSTOM_KG', title: 'ABN must match', layer: 'document', severity: 'high', weight: 20,
+    field: 'supplierAbn', operator: 'differsFromKnownGood',
+  }];
+  const r = analyze({ subject: docs.forged, policy });
+  const hit = r.ledger.find((e) => e.id === 'CUSTOM_KG');
+  assert.equal(hit.status, 'skipped');
+  assert.match(hit.reason, /known-good/i);
+});
+
+test('a malformed custom rule never breaks the run', () => {
+  const policy = defaultPolicy();
+  policy.custom = [
+    { id: 'C_BADREGEX', title: 'bad', layer: 'document', severity: 'low', weight: 1, field: 'text', operator: 'matches', value: '([' },
+    { id: 'C_NOFIELD', title: 'gone', layer: 'document', severity: 'low', weight: 1, field: 'nope.gone', operator: 'equals', value: 'x' },
+  ];
+  const r = analyze({ subject: docs.forged, reference: docs.genuine, policy });
+  assert.equal(r.ledger.find((e) => e.id === 'C_BADREGEX').status, 'clear');
+  assert.equal(r.ledger.find((e) => e.id === 'C_NOFIELD').status, 'skipped');
+  assert.equal(r.risk.band, 'high_risk');
+});
+
+test('a stored policy survives a round trip and rejects junk', () => {
+  const policy = defaultPolicy();
+  policy.disabled = ['DOC_URGENCY_LANGUAGE'];
+  policy.custom = [{ id: 'C1', title: 't', layer: 'document', severity: 'low', weight: 2, field: 'text', operator: 'contains', value: 'x' }];
+  const round = normalisePolicy(JSON.parse(JSON.stringify(policy)));
+  assert.deepEqual(round.disabled, policy.disabled);
+  assert.equal(round.custom.length, 1);
+
+  assert.deepEqual(normalisePolicy(null), defaultPolicy());
+  assert.deepEqual(normalisePolicy({ custom: [{ nope: true }], disabled: [1, 2] }).custom, []);
+  assert.deepEqual(normalisePolicy({ disabled: [1, 2] }).disabled, []);
+});
+
+test('allRules reports what is switched off without dropping it', () => {
+  const policy = defaultPolicy();
+  policy.disabled = ['DOC_URGENCY_LANGUAGE'];
+  const rules = allRules(policy);
+  assert.equal(rules.length, RULES.length);
+  assert.equal(rules.find((r) => r.id === 'DOC_URGENCY_LANGUAGE').enabled, false);
+});
+
+/* ---------------------------------------------------------------- report */
+test('the report renders to a valid docx and pdf', () => {
+  const report = buildReport(analyze({ subject: docs.forged, reference: docs.genuine }));
+  assert.ok(report.sections.length >= 5);
+
+  const docxBytes = buildDocx(report);
+  // PK zip magic
+  assert.equal(docxBytes[0], 0x50);
+  assert.equal(docxBytes[1], 0x4b);
+  assert.ok(docxBytes.length > 4000);
+
+  const pdfBytes = buildPdf(report);
+  assert.equal(new TextDecoder().decode(pdfBytes.slice(0, 5)), '%PDF-');
+  assert.ok(pdfBytes.length > 20000);
+});
+
+test('the report states when the policy was not the shipped one', () => {
+  const policy = defaultPolicy();
+  policy.disabled = ['PAY_ACCOUNT_CHANGED'];
+  const report = buildReport(analyze({ subject: docs.forged, reference: docs.genuine, policy }));
+  const section = report.sections.find((s) => s.heading === 'Policy in force');
+  const text = section.blocks.map((b) => b.text).join(' ');
+  assert.match(text, /did NOT use the shipped rule set/);
+  assert.match(text, /PAY_ACCOUNT_CHANGED/);
+});
+
+test('the report says so plainly when the shipped policy was used', () => {
+  const report = buildReport(analyze({ subject: docs.forged, reference: docs.genuine }));
+  const section = report.sections.find((s) => s.heading === 'Policy in force');
+  assert.match(section.blocks[0].text, /shipped rule set was used unchanged/);
 });

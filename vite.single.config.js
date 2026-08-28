@@ -4,6 +4,11 @@ import { defineConfig } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 
 export default defineConfig({
+  resolve: { alias: [
+    { find: /^html2canvas$/, replacement: '/src/report/optional-stub.js' },
+    { find: /^canvg$/, replacement: '/src/report/optional-stub.js' },
+    { find: /^dompurify$/, replacement: '/src/report/optional-stub.js' },
+  ] },
   base: './',
   publicDir: false,
   define: { __SINGLE_FILE__: 'true' },
