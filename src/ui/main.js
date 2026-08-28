@@ -6,8 +6,6 @@ import { extract, setPdfjs } from '../engine/extract.js';
 import { analyze } from '../engine/analyze.js';
 import { allRules, loadPolicy } from '../engine/policy.js';
 import { buildReport } from '../report/model.js';
-import { buildDocx } from '../report/docx.js';
-import { buildPdf } from '../report/pdf.js';
 import { MIME, inSandboxedFrame, saveFile } from './export.js';
 import { createSettings } from './settings.js';
 
@@ -204,9 +202,17 @@ function rescore() {
 }
 
 /* ------------------------------------------------------------- exporting */
-function exportReport(kind) {
+async function exportReport(kind, button) {
   if (!state.last) { toast('Screen an invoice first.'); return; }
+  const label = button?.textContent;
+  if (button) { button.disabled = true; button.textContent = 'Preparing…'; }
   try {
+    // Loaded on demand: the document renderers are a third of the bundle and
+    // most screenings never export.
+    const [{ buildDocx }, { buildPdf }] = await Promise.all([
+      import('../report/docx.js'),
+      import('../report/pdf.js'),
+    ]);
     const report = buildReport(state.last);
     const bytes = kind === 'docx' ? buildDocx(report) : buildPdf(report);
     const name = `${report.filenameStem}-screening-report.${kind}`;
@@ -216,7 +222,9 @@ function exportReport(kind) {
       : `${name} downloaded.`);
   } catch (err) {
     console.error(err);
-    toast(`Could not build the ${kind.toUpperCase()}: ${err.message}`);
+    toast(err.message);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = label; }
   }
 }
 
@@ -463,7 +471,7 @@ function render(result) {
   `;
 
   document.querySelectorAll('[data-export]').forEach((btn) => {
-    btn.addEventListener('click', () => exportReport(btn.dataset.export));
+    btn.addEventListener('click', () => exportReport(btn.dataset.export, btn));
   });
   document.querySelectorAll('.filter').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.filter === state.filter);

@@ -8,6 +8,8 @@ export default defineConfig({
     { find: /^html2canvas$/, replacement: '/src/report/optional-stub.js' },
     { find: /^canvg$/, replacement: '/src/report/optional-stub.js' },
     { find: /^dompurify$/, replacement: '/src/report/optional-stub.js' },
+    { find: '../report/docx.js', replacement: '/src/report/unavailable.js' },
+    { find: '../report/pdf.js', replacement: '/src/report/unavailable.js' },
   ] },
   base: './',
   publicDir: false,

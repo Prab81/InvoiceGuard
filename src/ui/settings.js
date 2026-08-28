@@ -6,7 +6,7 @@ import {
   RULE_FIELDS, RULE_OPERATORS, allRules, defaultPolicy, describeCustomRule,
   normalisePolicy, policyIsCustomised, savePolicy,
 } from '../engine/policy.js';
-import { MIME, readTextFile, saveFile } from './export.js';
+import { MIME, inSandboxedFrame, readTextFile, saveFile } from './export.js';
 
 const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
@@ -199,7 +199,9 @@ export function createSettings({ getPolicy, setPolicy, onChange, toast }) {
     if (act === 'export-policy') {
       saveFile(new TextEncoder().encode(JSON.stringify(draft, null, 2)),
         'invoiceguard-policy.json', MIME.json);
-      toast('Policy exported.');
+      toast(inSandboxedFrame
+        ? 'Policy file generated. If nothing downloaded, this preview blocks downloads — use the deployed app.'
+        : 'Policy exported to invoiceguard-policy.json.');
       return;
     }
     if (act === 'import-policy') {
