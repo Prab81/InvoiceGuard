@@ -567,3 +567,44 @@ test('a contract with nothing filled in is treated as absent', () => {
   assert.equal(r.contract, null);
   assert.equal(r.assurance.level, 'document-only');
 });
+
+
+/* ------------------------------------------------------ page regions */
+test('the page regions needed to draw findings are captured', () => {
+  const R = docs.tampered.layout.regions;
+  for (const key of ['paymentBlock', 'bsb', 'account', 'bank', 'accountName', 'abn', 'totals', 'dueDate']) {
+    assert.ok(Array.isArray(R[key]) && R[key].length === 4, `${key} region missing`);
+  }
+  // Boxes are [x0, top, x1, bottom] inside the page.
+  for (const [key, box] of Object.entries(R)) {
+    if (!Array.isArray(box)) continue;
+    // A region is either one box or a list of them; an empty list is fine.
+    const boxes = Array.isArray(box[0]) ? box : [box];
+    for (const b of boxes) {
+      if (!Array.isArray(b) || b.length !== 4) continue;
+      assert.ok(b[0] < b[2] && b[1] < b[3], `${key} box is inverted`);
+      assert.ok(b[2] <= docs.tampered.layout.pageWidth + 2, `${key} box runs off the page`);
+      assert.ok(b[3] <= docs.tampered.layout.pageHeight + 2, `${key} box runs below the page`);
+    }
+  }
+});
+
+test('the overlay region matches the patch the forensics found', () => {
+  const R = docs.tampered.layout.regions;
+  assert.equal(R.overlays.length, docs.tampered.layout.overlays.length);
+  assert.deepEqual(R.overlays[0], docs.tampered.layout.overlays[0].bbox);
+});
+
+test('an out-of-place figure carries the box to highlight it', () => {
+  const outliers = docs.retyped.layout.typography.figureOutliers;
+  assert.equal(outliers.length, 1);
+  assert.ok(Array.isArray(outliers[0].box) && outliers[0].box.length === 4);
+  assert.deepEqual(docs.retyped.layout.regions.figureOutliers[0], outliers[0].box);
+});
+
+test('a clean invoice still exposes regions, with nothing to draw on them', () => {
+  const R = docs.genuineNew.layout.regions;
+  assert.ok(R.paymentBlock);
+  assert.deepEqual(R.overlays, []);
+  assert.deepEqual(R.figureOutliers, []);
+});

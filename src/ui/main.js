@@ -8,6 +8,7 @@ import { allRules, loadPolicy } from '../engine/policy.js';
 import { buildReport } from '../report/model.js';
 import { MIME, inSandboxedFrame, saveFile } from './export.js';
 import { createSettings } from './settings.js';
+import { createInspector } from './inspector.js';
 
 /* global __SINGLE_FILE__ */
 const SINGLE_FILE = __SINGLE_FILE__;
@@ -27,7 +28,10 @@ const pdfReady = SINGLE_FILE
 
 const $ = (s) => document.querySelector(s);
 const state = {
-  subject: null, reference: null, last: null, filter: 'all',
+  subject: null, reference: null, last: null, filter: 'all', view: 'report',
+  // The raw PDF bytes are kept so the inspector can re-render the page
+  // without asking the reviewer to pick the file again.
+  bytes: null,
   policy: loadPolicy(),
   // The parsed documents are kept so a policy change can be re-scored
   // without re-reading the PDFs.
@@ -175,10 +179,12 @@ async function screen() {
   try {
     await pdfReady;
     const ev = evidenceState();
-    const subject = await extract(await readFile(state.subject), state.subject.name);
+    const subjectBytes = await readFile(state.subject);
+    const subject = await extract(subjectBytes, state.subject.name);
     const reference = ev.reference
       ? await extract(await readFile(state.reference), state.reference.name)
       : null;
+    state.bytes = subjectBytes;
     runAnalysis({
       subject,
       reference,
@@ -208,8 +214,10 @@ async function screenSample(sample) {
       return new Uint8Array(await res.arrayBuffer());
     };
     await pdfReady;
-    const subject = await extract(await grab(sample.file), sample.file);
+    const subjectBytes = await grab(sample.file);
+    const subject = await extract(subjectBytes, sample.file);
     const reference = await extract(await grab(sample.ref), sample.ref);
+    state.bytes = subjectBytes;
     runAnalysis({ subject, reference });
   } catch (err) {
     toast(err.message);
@@ -258,6 +266,32 @@ async function exportReport(kind, button) {
 }
 
 /* ---------------------------------------------------------- rendering */
+const inspector = createInspector({ pdfjs });
+
+function viewTabs() {
+  return `<div class="view-tabs" role="tablist">
+    ${[['report', 'Report'], ['inspect', 'Inspect the document']].map(([id, label]) => `
+      <button type="button" class="view-tab ${state.view === id ? 'is-active' : ''}"
+        role="tab" aria-selected="${state.view === id}" data-view="${id}">${label}</button>`).join('')}
+  </div>`;
+}
+
+async function mountInspector() {
+  const host = $('#inspectHost');
+  if (!host || !state.bytes || !state.last) return;
+  host.innerHTML = '<div class="panel"><p class="fieldnote"><span class="spinner"></span>Rendering the page…</p></div>';
+  try {
+    await inspector.render(host, {
+      bytes: state.bytes,
+      doc: state.last.subject,
+      ledger: state.last.ledger,
+    });
+  } catch (err) {
+    console.error(err);
+    host.innerHTML = `<div class="panel"><p class="fieldnote">The page could not be rendered: ${esc(err.message)}</p></div>`;
+  }
+}
+
 function gauge(score, band) {
   const r = 50, circ = 2 * Math.PI * r;
   const filled = (Math.max(0, Math.min(100, score)) / 100) * circ;
@@ -462,6 +496,7 @@ function render(result) {
         </div>
       </div>
       <div class="layers">${layerRows || '<p class="fieldnote">No layer scored above zero.</p>'}</div>
+      ${viewTabs()}
       ${result.unlocks?.length ? `<div class="unlock">
         <span class="unlock-lab">Not yet checked</span>
         <span>${result.unlocks.map((u) => `<b>${u.unlocks}</b> more with ${esc(u.evidence)}`).join(' · ')}</span>
@@ -473,6 +508,7 @@ function render(result) {
       </div>
     </section>
 
+    <div class="view-pane" id="reportBody"${state.view === 'report' ? '' : ' hidden'}>
     ${notices.map((n) => `<div class="notice notice-${n.kind}">${esc(n.text)}</div>`).join('')}
 
     <section class="panel">
@@ -501,12 +537,21 @@ function render(result) {
 
     ${diff ? diffPanel(diff) : ''}
 
+    </div>
+    <div id="inspectHost" class="view-pane"${state.view === 'inspect' ? '' : ' hidden'}></div>
+    <div class="view-pane"${state.view === 'report' ? '' : ' hidden'} id="reportTail">
     ${detailsPanel(subject, 'Read from the invoice under review')}
     ${reference ? detailsPanel(reference, 'Read from the known-good invoice') : ''}
 
     ${subject.warnings.length ? `<div class="notice notice-info">${subject.warnings.map(esc).join(' ')}</div>` : ''}
+    </div>
   `;
 
+  document.querySelectorAll('[data-view]').forEach((btn) => {
+    btn.addEventListener('click', () => switchView(btn.dataset.view));
+  });
+  $('#results').addEventListener('inspect:zoom', () => mountInspector());
+  if (state.view === 'inspect') mountInspector();
   document.querySelectorAll('[data-export]').forEach((btn) => {
     btn.addEventListener('click', () => exportReport(btn.dataset.export, btn));
   });
@@ -519,6 +564,19 @@ function render(result) {
     });
   });
   $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function switchView(view) {
+  state.view = view;
+  document.querySelectorAll('[data-view]').forEach((b) => {
+    const on = b.dataset.view === view;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  $('#reportBody').hidden = view !== 'report';
+  $('#reportTail').hidden = view !== 'report';
+  $('#inspectHost').hidden = view !== 'inspect';
+  if (view === 'inspect' && !$('#inspectHost').childElementCount) mountInspector();
 }
 
 /* ------------------------------------------------------------- wiring */

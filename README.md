@@ -121,6 +121,23 @@ drawdown that would take the project past the contract sum altogether.
 Measured on the adversarial clone: the contract alone blocks it at **100**,
 where a known-good invoice reaches **78**.
 
+## Two views
+
+**Report** — the verdict, every rule that fired with its evidence and action,
+the attribute comparison, and the full ledger.
+
+**Inspect the document** — the same findings drawn back onto the page they came
+from. The extractor already needs page coordinates to work, so every forensic
+finding knows where it is: the patched rectangle, the payment block, the BSB
+line, an amount set in the wrong point size. Click a highlight or a finding and
+they select each other. Findings with no place on the page — metadata, the
+file's own structure, the contract — are listed separately rather than pretended
+onto it.
+
+Regions nest, so the smallest one under the cursor wins the click, and several
+findings landing on one region share a single marker instead of stacking
+unreachable duplicates on top of each other.
+
 ## What the reviewer sees
 
 * **Verdict** — score, band, the action it implies, and how many of the 50
@@ -214,7 +231,7 @@ check, so a single edit is never counted twice.
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm test         # 45 engine tests
+npm test         # 60 engine tests
 npm run build    # -> dist/
 ```
 

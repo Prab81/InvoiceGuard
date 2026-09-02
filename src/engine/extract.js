@@ -203,6 +203,17 @@ function lineText(line) {
 
 const blockText = (runs) => groupLines(runs).map(lineText).join('\n');
 
+/** Page-space box for a set of runs: [x0, top, x1, bottom], origin top-left. */
+function boxOf(runs, pad = 1.5) {
+  if (!runs.length) return null;
+  return [
+    Math.min(...runs.map((r) => r.x0)) - pad,
+    Math.min(...runs.map((r) => r.top)) - pad,
+    Math.max(...runs.map((r) => r.x1)) + pad,
+    Math.max(...runs.map((r) => r.baseline)) + pad,
+  ].map((v) => Math.round(v * 10) / 10);
+}
+
 /**
  * Reconstruct the page once per (font, size) group.
  *
@@ -295,7 +306,7 @@ function typographyFacts(runs, detailRuns) {
     figureOutliers: figures
       .filter((r) => fontFamily(r.font) !== domFigFont
         || Math.abs(round(r.size) - Number(domFigSize)) > 0.2)
-      .map((r) => ({ text: r.text.trim(), font: fontFamily(r.font), size: round(r.size) })),
+      .map((r) => ({ text: r.text.trim(), font: fontFamily(r.font), size: round(r.size), box: boxOf([r]) })),
   };
 }
 
@@ -545,6 +556,9 @@ function emptyLayout() {
     overlays: [], coveredSnippets: [], invisibleSnippets: [], allBsbMatches: [], allAccountMatches: [],
     lineGapAnomaly: null, imageCount: 0, imageHashes: [], fullPageImage: false, runCount: 0,
     overprintRatio: 0, textLayers: [], paymentCandidates: [], labelAnchors: {},
+    // Where things sit on the page, so a finding can be pointed at rather than
+    // only described. Boxes are [x0, top, x1, bottom] in PDF points.
+    regions: {},
     typography: {
       dominantFont: null, dominantSize: null,
       paymentDetailFonts: [], paymentDetailSizes: [],
@@ -665,6 +679,46 @@ function buildLayout({ runs, lines, text, shapes, viewport, imageHashes }) {
     }
   }
   if (!text.trim() && shapes.images.length) L.fullPageImage = true;
+
+  // --- regions: where on the page each finding can be pointed at ---------
+  // Boxes are [x0, top, x1, bottom] in PDF points with a top-left origin, so a
+  // viewer only has to multiply by its render scale.
+  const R = {};
+  const addLine = (key, re) => {
+    const ln = lines.find((l) => re.test(lineText(l)));
+    if (ln) R[key] = boxOf(ln);
+  };
+  if (L.paymentBlockBbox) R.paymentBlock = L.paymentBlockBbox.map((v) => Math.round(v * 10) / 10);
+  addLine('accountName', /^\s*Account\s*Name\s*[:#]/i);
+  addLine('bank', /^\s*Bank(?:\s*Name)?\s*[:#]/i);
+  addLine('bsb', /\bBSB\s*[:#]/i);
+  addLine('account', /^\s*Acc(?:oun)?t(?:\s*(?:Number|No\.?|#))?\s*[:#]/i);
+  addLine('abn', /\bABN\b/i);
+  addLine('licence', /\bLicen[cs]e\b/i);
+  addLine('dueDate', /\bDue\s*Date\b/i);
+  addLine('subtotal', /\bSub\s*-?\s*total\b/i);
+  addLine('gst', /\bTotal\s*GST\b/i);
+  addLine('invoiceTotal', /\bInvoice\s*Total\b/i);
+  addLine('amountDue', /\bAmount\s*(?:Due|Payable|Owing)\b/i);
+  addLine('reference', /^\s*Reference\s*$/i);
+  addLine('invoiceNumber', /\bInvoice\s*(?:Number|No\.?|#)/i);
+
+  const emailRun = runs.find((r) => /[\w.+-]+@[\w-]+\.[\w.-]+/.test(r.text));
+  if (emailRun) R.email = boxOf([emailRun]);
+  const phoneRun = runs.find((r) => /\b(?:Ph|Phone|Tel|Mob)\b/i.test(r.text));
+  if (phoneRun) R.phone = boxOf([phoneRun]);
+
+  const totalBoxes = ['subtotal', 'gst', 'invoiceTotal', 'amountDue'].map((k) => R[k]).filter(Boolean);
+  if (totalBoxes.length) {
+    R.totals = [
+      Math.min(...totalBoxes.map((b) => b[0])), Math.min(...totalBoxes.map((b) => b[1])),
+      Math.max(...totalBoxes.map((b) => b[2])), Math.max(...totalBoxes.map((b) => b[3])),
+    ];
+  }
+  R.overlays = L.overlays.map((o) => o.bbox);
+  R.figureOutliers = (L.typography.figureOutliers || []).map((o) => o.box).filter(Boolean);
+  R.header = boxOf(runs.filter((r) => r.top < 120));
+  L.regions = R;
   return L;
 }
 
