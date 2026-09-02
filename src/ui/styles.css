@@ -494,32 +494,85 @@ table.diff tr.why td {
 
 .page-wrap {
   background: var(--sunk); border: 1px solid var(--rule); border-radius: 8px;
-  padding: 14px; overflow: auto; max-height: 78vh;
+  padding: 14px 14px 14px 44px; overflow: auto; max-height: 78vh;
 }
 .page-stage { position: relative; margin: 8px auto; filter: drop-shadow(0 2px 10px rgb(19 27 38 / 14%)); }
 .page-stage canvas { display: block; border-radius: 2px; background: #fff; }
 .hotspots { position: absolute; inset: 0; }
 
+/* Markers sit quiet until they are wanted. A reviewer scanning the page needs
+   to see that something was found; a reviewer who has picked one finding needs
+   to see *which* box it is, at a glance, over whatever the page prints there.
+   So resting is a thin outline with almost no fill, and selected is a filled,
+   ringed, lifted box while everything else fades back. */
 .hotspot {
   position: absolute; border-radius: 3px; cursor: pointer;
-  border: 1.5px solid currentColor; background: transparent;
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 55%);
-  transition: box-shadow .12s, background .12s;
+  border: 1.5px dashed var(--sev); background: transparent;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 70%);
+  transition: box-shadow .14s ease, opacity .14s ease, border-color .14s ease, transform .14s ease;
 }
-/* The tint stays light: the point is to read the document through it. */
 .hotspot::after {
-  content: ''; position: absolute; inset: 0; background: currentColor;
-  opacity: .12; border-radius: 2px; pointer-events: none;
+  content: ''; position: absolute; inset: 0; background: var(--sev);
+  opacity: .07; border-radius: 2px; pointer-events: none; transition: opacity .14s ease;
 }
-.hotspot:hover::after { opacity: .2; }
-.hotspot.is-hover, .hotspot.is-active { box-shadow: 0 0 0 3px rgb(255 255 255 / 78%), 0 3px 12px rgb(0 0 0 / 32%); }
-.hotspot.is-active::after { opacity: .26; }
 
-.hotspot.sev-critical, .hot-item.sev-critical .hot-pin { color: var(--critical); --pin: var(--critical); }
-.hotspot.sev-high, .hot-item.sev-high .hot-pin { color: var(--high); --pin: var(--high); }
-.hotspot.sev-medium, .hot-item.sev-medium .hot-pin { color: var(--medium); --pin: var(--medium); }
-.hotspot.sev-low, .hot-item.sev-low .hot-pin { color: var(--low); --pin: var(--low); }
-.hotspot.sev-info, .hot-item.sev-info .hot-pin { color: var(--clear); --pin: var(--clear); }
+/* The number ties the box to its row in the list beside it. It hangs in the
+   margin, never over the box - the digits inside are the thing being read -
+   and only for the marker under the pointer or the one selected: payment rows
+   sit a few pixels apart on a fitted page, so a badge per box is a pile. */
+.hotspot::before {
+  content: attr(data-label);
+  position: absolute; right: 100%; top: 50%;
+  margin-right: calc(4px + var(--lane, 0) * 17px);
+  transform: translateY(-50%); transform-origin: right center; z-index: 1;
+  min-width: 14px; height: 14px; padding: 0 4px; border-radius: 7px;
+  background: var(--sev); color: #fff; opacity: 0;
+  font: 700 9px/14px ui-sans-serif, system-ui, -apple-system, sans-serif;
+  text-align: center; white-space: nowrap; pointer-events: none;
+  box-shadow: 0 0 0 1.5px #fff, 0 1px 3px rgb(0 0 0 / 35%);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.hotspot:hover, .hotspot.is-hover {
+  border-style: solid; border-width: 2px;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--sev) 34%, transparent);
+}
+.hotspot:hover::after, .hotspot.is-hover::after { opacity: .2; }
+.hotspot.is-lead-hover::before { opacity: 1; }
+
+.hotspot.is-active {
+  border: 2.5px solid var(--sev); z-index: 99 !important;
+  box-shadow: 0 0 0 2.5px #fff, 0 0 0 6px color-mix(in srgb, var(--sev) 62%, transparent),
+    0 6px 20px rgb(0 0 0 / 38%);
+  animation: hot-pulse .6s ease-out 1;
+}
+.hotspot.is-active::after { opacity: .26; }
+.hotspot.is-active.is-lead::before { opacity: 1; transform: translateY(-50%) scale(1.2); }
+
+/* One selected box reads far faster when its neighbours step back. */
+.hotspots.is-selecting .hotspot:not(.is-active) { opacity: .28; }
+.hotspots.is-selecting .hotspot:not(.is-active):hover { opacity: .8; }
+
+@keyframes hot-pulse {
+  0% {
+    box-shadow: 0 0 0 2.5px #fff, 0 0 0 6px color-mix(in srgb, var(--sev) 85%, transparent),
+      0 6px 20px rgb(0 0 0 / 38%);
+  }
+  70% {
+    box-shadow: 0 0 0 2.5px #fff, 0 0 0 17px color-mix(in srgb, var(--sev) 0%, transparent),
+      0 6px 20px rgb(0 0 0 / 38%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hotspot { transition: none; }
+  .hotspot.is-active { animation: none; }
+}
+
+.hotspot.sev-critical, .hot-item.sev-critical, .inspect-legend .sev-critical { --sev: var(--critical); }
+.hotspot.sev-high, .hot-item.sev-high, .inspect-legend .sev-high { --sev: var(--high); }
+.hotspot.sev-medium, .hot-item.sev-medium, .inspect-legend .sev-medium { --sev: var(--medium); }
+.hotspot.sev-low, .hot-item.sev-low, .inspect-legend .sev-low { --sev: var(--low); }
+.hotspot.sev-info, .hot-item.sev-info, .inspect-legend .sev-info { --sev: var(--clear); }
 
 .hot-list { display: grid; gap: 6px; max-height: 78vh; overflow-y: auto; align-content: start; }
 .hot-item {
@@ -528,10 +581,17 @@ table.diff tr.why td {
   background: var(--surface); cursor: pointer; width: 100%; color: var(--ink);
 }
 .hot-item.is-flat { cursor: default; background: var(--sunk); }
-.hot-item:hover, .hot-item.is-hover { border-color: var(--rule-strong); }
-.hot-item.is-active { border-color: currentColor; box-shadow: 0 0 0 2px var(--accent-soft); }
+.hot-item:hover, .hot-item.is-hover {
+  border-color: color-mix(in srgb, var(--sev) 38%, var(--rule));
+  background: color-mix(in srgb, var(--sev) 4%, var(--surface));
+}
+.hot-item.is-active {
+  border-color: var(--sev); background: color-mix(in srgb, var(--sev) 10%, var(--surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sev) 34%, transparent);
+}
+.hot-item.is-active .hot-title { color: var(--sev); }
 .hot-pin {
-  width: 20px; height: 20px; border-radius: 50%; background: currentColor; color: #fff;
+  width: 20px; height: 20px; border-radius: 50%; background: var(--sev, var(--ink-3)); color: #fff;
   font-size: 10.5px; font-weight: 700; display: grid; place-items: center; margin-top: 1px;
 }
 .hot-title { display: block; font-weight: 640; font-size: 13.4px; color: var(--ink); }
@@ -550,6 +610,6 @@ table.diff tr.why td {
 .inspect-legend b { font-weight: 500; }
 .inspect-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .inspect-legend i {
-  width: 11px; height: 11px; border-radius: 3px; border: 1.5px solid currentColor;
-  background: color-mix(in srgb, currentColor 16%, transparent);
+  width: 11px; height: 11px; border-radius: 3px; border: 1.5px solid var(--sev);
+  background: color-mix(in srgb, var(--sev) 30%, transparent);
 }

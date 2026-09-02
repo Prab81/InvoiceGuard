@@ -112,6 +112,7 @@ export function createInspector({ pdfjs }) {
         </div>
         <div class="inspect-legend">
           <b>Click a highlight or a finding — they select each other.</b>
+          <span class="fieldnote">Click bare page to clear.</span>
           ${['critical', 'high', 'medium', 'low'].map((sev) =>
             `<span class="sev-${sev}"><i></i>${sev}</span>`).join('')}
         </div>
@@ -158,8 +159,12 @@ export function createInspector({ pdfjs }) {
     const page = await pdf.getPage(1);
     const base = page.getViewport({ scale: 1 });
 
-    // Fit the column, then honour the zoom the reviewer chose.
-    const cssWidth = Math.max(280, (wrap.clientWidth || 520) - 2) * state.scale;
+    // Fit the column, then honour the zoom the reviewer chose. clientWidth counts
+    // the padding, and the left padding is the badge gutter, so take it back out.
+    const pad = getComputedStyle(wrap);
+    const inner = (wrap.clientWidth || 520)
+      - (parseFloat(pad.paddingLeft) || 0) - (parseFloat(pad.paddingRight) || 0);
+    const cssWidth = Math.max(280, inner - 2) * state.scale;
     const cssScale = cssWidth / base.width;
     const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
     const viewport = page.getViewport({ scale: cssScale * dpr });
@@ -200,10 +205,28 @@ export function createInspector({ pdfjs }) {
       .sort((a, b) => b.area - a.area);
     state.spots = spots;
 
-    host.querySelector('#hotspots').innerHTML = spots.map((sp, z) => {
+    // Badges hang in the margin beside their box. Regions stack - the BSB line
+    // sits inside the payment block - so badges that would land on top of each
+    // other step out into a further lane instead.
+    const placed = [];
+    for (const sp of spots) {
+      const cy = ((sp.box[1] + sp.box[3]) / 2) * cssScale;
+      const cx = sp.box[0] * cssScale;
+      let lane = 0;
+      while (lane < 1 && placed.some((q) => q.lane === lane
+        && Math.abs(q.cy - cy) < 20 && Math.abs(q.cx - cx) < 70)) lane += 1;
+      placed.push({ cx, cy, lane });
+      sp.lane = lane;
+    }
+
+    const layer = host.querySelector('#hotspots');
+    layer.classList.remove('is-selecting');
+    layer.innerHTML = spots.map((sp, z) => {
       const [x0, top, x1, bottom] = sp.box;
       return `<span class="hotspot sev-${sp.severity}" data-spot="${z}"
-        data-findings="${sp.findings.join(',')}" style="
+        data-findings="${sp.findings.join(',')}"
+        data-label="${sp.findings.map((i) => i + 1).join('/')}" style="
+          --lane:${sp.lane};
           left:${x0 * cssScale}px; top:${top * cssScale}px;
           width:${Math.max(8, (x1 - x0) * cssScale)}px;
           height:${Math.max(8, (bottom - top) * cssScale)}px; z-index:${z + 1}"
@@ -219,14 +242,28 @@ export function createInspector({ pdfjs }) {
     host.querySelectorAll('.hot-item[data-idx]').forEach((el) => {
       el.classList.toggle('is-active', set.has(el.dataset.idx));
     });
+    let lead = true;
     host.querySelectorAll('.hotspot').forEach((el) => {
       const on = el.dataset.findings.split(',').some((i) => set.has(i));
-      el.classList.toggle('is-active', on);
+      // Drop the class first so the attention pulse replays on a repeat click.
+      el.classList.remove('is-active', 'is-lead');
+      if (!on) return;
+      void el.offsetWidth;
+      el.classList.add('is-active');
+      // One finding can light two boxes; only the first carries the number, or
+      // the two badges land on top of each other.
+      if (lead) { el.classList.add('is-lead'); lead = false; }
     });
+    host.querySelector('#hotspots')?.classList.add('is-selecting');
     host.querySelector(`.hot-item[data-idx="${indices[0]}"]`)
       ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     host.querySelector('.hotspot.is-active')
       ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  function clearSelection(host) {
+    host.querySelectorAll('.is-active').forEach((el) => el.classList.remove('is-active', 'is-lead'));
+    host.querySelector('#hotspots')?.classList.remove('is-selecting');
   }
 
   function wire(host) {
@@ -236,6 +273,8 @@ export function createInspector({ pdfjs }) {
       const item = e.target.closest('.hot-item[data-idx]');
       if (item) select(host, [item.dataset.idx]);
 
+      if (!spot && !item && e.target.closest('#pageWrap')) clearSelection(host);
+
       const zoom = e.target.closest('[data-zoom]')?.dataset.zoom;
       if (zoom) {
         state.scale = Math.min(2.4, Math.max(0.6, state.scale + (zoom === 'in' ? 0.25 : -0.25)));
@@ -243,16 +282,28 @@ export function createInspector({ pdfjs }) {
       }
     });
 
+    function clearHover() {
+      host.querySelectorAll('.is-hover, .is-lead-hover')
+        .forEach((el) => el.classList.remove('is-hover', 'is-lead-hover'));
+    }
+
+    host.addEventListener('mouseleave', clearHover);
     host.addEventListener('mouseover', (e) => {
       const spot = e.target.closest('.hotspot');
       const item = e.target.closest('.hot-item[data-idx]');
-      if (!spot && !item) return;
+      if (!spot && !item) { clearHover(); return; }
       const ids = new Set(spot ? spot.dataset.findings.split(',') : [item.dataset.idx]);
       host.querySelectorAll('.hot-item[data-idx]').forEach((el) => {
         el.classList.toggle('is-hover', ids.has(el.dataset.idx));
       });
+      let lead = true;
       host.querySelectorAll('.hotspot').forEach((el) => {
-        el.classList.toggle('is-hover', el.dataset.findings.split(',').some((i) => ids.has(i)));
+        const on = el.dataset.findings.split(',').some((i) => ids.has(i));
+        el.classList.toggle('is-hover', on);
+        // As with selection, the number goes on one box, not on every box the
+        // finding touches - two badges a few pixels apart are unreadable.
+        el.classList.toggle('is-lead-hover', on && (spot ? el === spot : lead));
+        if (on) lead = false;
       });
     });
   }
