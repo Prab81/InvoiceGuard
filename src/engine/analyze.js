@@ -73,6 +73,77 @@ export function knownGoodFromDetails(details = {}) {
   return kg;
 }
 
+/** Normalise whatever the reviewer supplied about the building contract. */
+export function normaliseContract(raw) {
+  if (!raw) return null;
+  const num = (v) => {
+    const n = Number(String(v ?? '').replace(/[^0-9.]/g, ''));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const stages = (raw.stages || [])
+    .map((s) => ({ name: String(s.name || '').trim(), percent: Number(s.percent) }))
+    .filter((s) => s.name && Number.isFinite(s.percent));
+  const bsb = normaliseBsb(raw.nominated?.bsb || raw.bsb);
+  const account = String(raw.nominated?.account || raw.account || '').replace(/\D/g, '');
+  const contract = {
+    contractSum: num(raw.contractSum),
+    drawnToDate: raw.drawnToDate === '' || raw.drawnToDate === null || raw.drawnToDate === undefined
+      ? null : (num(raw.drawnToDate) ?? 0),
+    builderName: (raw.builderName || '').trim() || null,
+    abn: (raw.abn || '').trim() || null,
+    licence: (raw.licence || '').trim() || null,
+    phone: (raw.phone || '').trim() || null,
+    nominated: (bsb && account) ? { bsb, account, bank: (raw.nominated?.bank || raw.bank || '').trim() || null } : null,
+    stages,
+    filename: raw.filename || null,
+  };
+  const carriesSomething = contract.contractSum || contract.nominated || contract.stages.length
+    || contract.abn || contract.licence;
+  return carriesSomething ? contract : null;
+}
+
+/** Known-good facts the contract itself establishes. */
+export function knownGoodFromContract(contract) {
+  const kg = emptyKnownGood('building-contract');
+  if (contract.nominated) {
+    kg.accounts.push({ bsb: contract.nominated.bsb, account: contract.nominated.account, bank: contract.nominated.bank });
+  }
+  kg.accountName = contract.builderName;
+  kg.supplierName = contract.builderName;
+  kg.abn = contract.abn;
+  kg.licence = contract.licence;
+  if (contract.phone) kg.phones.push(contract.phone);
+  return kg;
+}
+
+/**
+ * Merge every source of known-good the reviewer supplied.
+ *
+ * Precedence is deliberate. The contract was signed before the attack and lives
+ * in the bank's loan file; a reference invoice came out of the mailbox the
+ * attacker compromised. Where they disagree, the contract is right.
+ */
+export function mergeKnownGood(sources) {
+  const present = sources.filter(Boolean);
+  if (!present.length) return null;
+  const merged = emptyKnownGood(present.map((s) => s.source).join('+'));
+  merged.sources = present.map((s) => s.source);
+  const scalars = ['accountName', 'abn', 'licence', 'title', 'byteSize', 'bsbAnchor', 'supplierName', 'sha256'];
+  const lists = ['accounts', 'emails', 'phones', 'producers', 'creators', 'authors', 'pdfVersions',
+    'imageHashes', 'bodyFonts', 'invoiceNumbers', 'invoiceDates', 'termsDays', 'stages'];
+  for (const source of present) {
+    for (const key of scalars) if (merged[key] === null || merged[key] === undefined) merged[key] = source[key];
+    for (const key of lists) {
+      for (const value of source[key] || []) {
+        const already = merged[key].some((v) => JSON.stringify(v) === JSON.stringify(value));
+        if (!already) merged[key].push(value);
+      }
+    }
+    merged.titlePresent = merged.titlePresent || source.titlePresent;
+  }
+  return merged;
+}
+
 export function hasAnyKnownGood(kg) {
   if (!kg) return false;
   return Boolean(
@@ -238,23 +309,74 @@ export function buildDiff(subject, reference) {
  * @param {object|null} reference  extracted known-good invoice, if supplied
  * @param {object|null} details    known-good details typed in, if supplied
  */
-export function analyze({ subject, reference = null, details = null, policy = null }) {
-  const activePolicy = normalisePolicy(policy || defaultPolicy());
-  let knownGood = null;
-  if (reference) {
-    knownGood = knownGoodFromReference(reference);
-  } else if (details) {
-    const kg = knownGoodFromDetails(details);
-    if (hasAnyKnownGood(kg)) knownGood = kg;
+/**
+ * Assurance describes what the evidence supplied can actually support - which
+ * is not the same question as what fired.
+ *
+ * With one invoice and nothing else, a clean result means "nothing wrong inside
+ * the document". It does not mean the money is going to the right place, and
+ * the tool must not imply that it does: a competent clone of a genuine invoice
+ * is indistinguishable from the original on intrinsic evidence alone.
+ */
+export function assuranceOf({ knownGood, contract }) {
+  if (contract?.nominated) {
+    return {
+      level: 'contract-anchored',
+      label: 'Contract-anchored',
+      payeeAssessed: true,
+      note: 'The payee was checked against the executed contract - the strongest anchor available.',
+    };
   }
+  if (knownGood?.accounts?.length) {
+    return {
+      level: 'history-anchored',
+      label: 'History-anchored',
+      payeeAssessed: true,
+      note: 'The payee was checked against known-good details supplied by the reviewer.',
+    };
+  }
+  return {
+    level: 'document-only',
+    label: 'Document-only',
+    payeeAssessed: false,
+    note: 'Nothing was supplied to check the payee against, so only the document itself was assessed. '
+      + 'A faithful copy of a genuine invoice with the account changed looks identical from the inside.',
+  };
+}
 
-  const ctx = { doc: subject, ref: reference, knownGood, hasKnownGood: Boolean(knownGood) };
+/**
+ * @param {object}      subject    the invoice under review - the only required input
+ * @param {object|null} reference  a known-good invoice, if one is held
+ * @param {object|null} details    known-good payment details, if typed in
+ * @param {object|null} contract   the building contract, if held
+ * @param {object|null} policy     the detection policy in force
+ */
+export function analyze({ subject, reference = null, details = null, contract = null, policy = null }) {
+  const activePolicy = normalisePolicy(policy || defaultPolicy());
+  const contractFacts = normaliseContract(contract);
+
+  // Every source is optional and they compose; whatever is present is used.
+  const knownGood = mergeKnownGood([
+    contractFacts ? knownGoodFromContract(contractFacts) : null,
+    reference ? knownGoodFromReference(reference) : null,
+    details ? (hasAnyKnownGood(knownGoodFromDetails(details)) ? knownGoodFromDetails(details) : null) : null,
+  ]);
+
+  const ctx = {
+    doc: subject,
+    ref: reference,
+    contract: contractFacts,
+    knownGood,
+    hasKnownGood: Boolean(knownGood),
+  };
   const { ledger, findings } = runRules(ctx, activeRules(activePolicy));
+  const assurance = assuranceOf({ knownGood, contract: contractFacts });
   const risk = score(findings, {
-    hasKnownGood: Boolean(knownGood?.accounts?.length),
+    hasKnownGood: assurance.payeeAssessed,
     parseWarnings: subject.warnings.length,
     caps: capsFor(activePolicy),
     bands: bandsFor(activePolicy),
+    assurance,
   });
 
   const coverage = {
@@ -283,12 +405,25 @@ export function analyze({ subject, reference = null, details = null, policy = nu
       notices.push({ kind: 'warning', text: 'The same file was supplied twice, so the comparison has nothing to compare.' });
     }
   }
-  if (!knownGood) {
-    notices.push({
-      kind: 'info',
-      text: 'No known-good details were supplied, so the strongest check - has this supplier ever been paid at this account - could not run. '
-        + 'The verdict below rests on the document’s own structure and content.',
-    });
+  if (!assurance.payeeAssessed) {
+    notices.push({ kind: 'warning', text: assurance.note });
+  }
+
+  // What would adding each missing document buy? Derived from the reasons the
+  // rules themselves gave, so the hint can never drift from the engine.
+  const unlocks = [];
+  const countBy = (needle) => ledger.filter((e) => e.status === 'skipped' && e.reason?.includes(needle)).length;
+  if (!reference) {
+    const n = countBy('reference invoice');
+    if (n) unlocks.push({ evidence: 'a known-good invoice', unlocks: n });
+  }
+  if (!knownGood?.accounts?.length) {
+    const n = countBy('known-good bank details');
+    if (n) unlocks.push({ evidence: 'known-good bank details', unlocks: n });
+  }
+  if (!contractFacts) {
+    const n = countBy('building contract');
+    if (n) unlocks.push({ evidence: 'the building contract', unlocks: n });
   }
 
   ledger.sort((a, b) => {
@@ -300,9 +435,12 @@ export function analyze({ subject, reference = null, details = null, policy = nu
 
   return {
     risk,
+    assurance,
+    contract: contractFacts,
     policy: activePolicy,
     ledger,
     coverage,
+    unlocks,
     notices,
     knownGood,
     subject,

@@ -23,7 +23,7 @@ export const BANDS = [
     decision: 'Nothing inconsistent was found. Normal payment controls still apply.' },
 ];
 
-export function score(findings, { hasKnownGood, parseWarnings = 0, caps = null, bands = null }) {
+export function score(findings, { hasKnownGood, parseWarnings = 0, caps = null, bands = null, assurance = null }) {
   const layerCaps = caps || Object.fromEntries(Object.entries(LAYERS).map(([k, v]) => [k, v.cap]));
   const bandTable = bands || BANDS;
   const raw = {};
@@ -45,7 +45,20 @@ export function score(findings, { hasKnownGood, parseWarnings = 0, caps = null, 
   if (worst >= 4) total = Math.max(total, topBand.min + 3);
   else if (worst === 3) total = Math.max(total, reviewBand.min);
 
-  const band = bandTable.find((b) => total >= b.min) || bandTable[bandTable.length - 1];
+  let band = bandTable.find((b) => total >= b.min) || bandTable[bandTable.length - 1];
+
+  // "Likely authentic" is a positive claim about where the money is going, and
+  // no amount of intrinsic evidence can support it: a faithful copy of a real
+  // invoice with the account changed is clean on every check the document can
+  // answer. Without a payee anchor the honest ceiling is lower, and named.
+  if (assurance && !assurance.payeeAssessed && band.key === 'likely_authentic') {
+    band = {
+      key: 'document_only',
+      label: 'No tampering found - payee unverified',
+      decision: 'Nothing in the document itself is inconsistent, but nothing here shows the money is going '
+        + 'to the right account. Confirm the payee out of band, or add the contract or a known-good invoice.',
+    };
+  }
 
   const confidence = !hasKnownGood
     ? { level: 'limited', text: 'Limited - no known-good details, so the account-change check could not run.' }
@@ -58,6 +71,7 @@ export function score(findings, { hasKnownGood, parseWarnings = 0, caps = null, 
     band: band.key,
     bandLabel: band.label,
     decision: band.decision,
+    assurance,
     layerScores,
     confidence,
     topReasons: findings

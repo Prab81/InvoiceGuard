@@ -6,7 +6,7 @@
 // A rule that silently does not run is worse than one that fails loudly.
 
 import {
-  BANK_CHANGE_NOTICE, URGENCY_LANGUAGE, accountDigitRange, canonicalBankName,
+  BANK_CHANGE_NOTICE, normaliseBsb, URGENCY_LANGUAGE, accountDigitRange, canonicalBankName,
   classifyStage, lookupBsb, matchEditorFingerprint, validateAbn,
 } from './reference.js';
 import { daysBetween, fontFamily, metaDateGapHours } from './extract.js';
@@ -26,6 +26,11 @@ export const LAYERS = {
     label: 'Content and business logic',
     blurb: 'Arithmetic, identity numbers, contacts, numbering and the stage schedule.',
     cap: 40,
+  },
+  contract: {
+    label: 'Building contract',
+    blurb: 'The claim measured against the executed contract - the one baseline the attacker never sees.',
+    cap: 60,
   },
   metadata: {
     label: 'File metadata',
@@ -910,5 +915,157 @@ const metadataRules = [
   },
 ];
 
-export const RULES = [...paymentRules, ...forensicsRules, ...documentRules, ...metadataRules];
+
+/* ====================================================================== */
+/* Building contract                                                      */
+/* ====================================================================== */
+//
+// Every other baseline in this engine is downstream of the channel the
+// attacker compromised: a reference invoice comes from the borrower's mailbox,
+// typed details from someone who may be reading the hijacked thread, a learned
+// account from a payment that already settled. The executed contract is held by
+// the bank, signed before the first claim, and the fraudster never sees it. So
+// where the contract and the payment history disagree, the contract wins.
+const NEEDS_CONTRACT = 'Needs the building contract - add it to run this check.';
+
+const contractRules = [
+  {
+    id: 'CON_ACCOUNT_NOT_CONTRACTED',
+    title: 'Payment is not going to the account named in the contract',
+    parameter: 'BSB + account vs the contracted payment account',
+    layer: 'contract', severity: 'critical', weight: 45,
+    requires: ({ contract, doc }) => {
+      if (!contract?.nominated?.bsb || !contract?.nominated?.account) return NEEDS_CONTRACT;
+      if (!doc.payment.bsb || !doc.payment.accountNumber) return NEEDS_PAYMENT;
+      return null;
+    },
+    evaluate({ doc, contract }) {
+      const n = contract.nominated;
+      if (normaliseBsb(n.bsb) === doc.payment.bsb && String(n.account).replace(/\D/g, '') === doc.payment.accountNumber) return null;
+      return {
+        evidence: `The contract nominates ${normaliseBsb(n.bsb)} / ${String(n.account).replace(/\D/g, '')}`
+          + `${n.bank ? ` at ${n.bank}` : ''} for progress payments. This invoice directs payment to `
+          + `${doc.payment.bsb} / ${doc.payment.accountNumber}${doc.payment.bankPrinted ? ` at ${doc.payment.bankPrinted}` : ''}.`,
+        recommendation: 'Block. The contract is the one record the fraudster has no access to, so a claim '
+          + 'that disagrees with it is not a clerical difference. Confirm on the contract phone number before any release.',
+        detail: { contracted: n, presented: { bsb: doc.payment.bsb, account: doc.payment.accountNumber } },
+      };
+    },
+  },
+  {
+    id: 'CON_ACCOUNT_MATCHES_CONTRACT',
+    title: 'Payment matches the account named in the contract',
+    parameter: 'BSB + account vs the contracted payment account',
+    layer: 'contract', severity: 'info', weight: -15, polarity: 'reassuring',
+    requires: ({ contract, doc }) => (contract?.nominated?.bsb && doc.payment.bsb ? null : NEEDS_CONTRACT),
+    evaluate({ doc, contract }) {
+      const n = contract.nominated;
+      if (normaliseBsb(n.bsb) !== doc.payment.bsb
+        || String(n.account).replace(/\D/g, '') !== doc.payment.accountNumber) return null;
+      return {
+        evidence: `Funds are directed to ${doc.payment.bsb} / ${doc.payment.accountNumber}, the account named `
+          + 'in the executed contract.',
+        recommendation: 'The strongest payee assurance this tool can give.',
+      };
+    },
+  },
+  {
+    id: 'CON_ABN_MISMATCH',
+    title: 'ABN differs from the contracted builder',
+    parameter: 'Invoice ABN vs the contract ABN',
+    layer: 'contract', severity: 'critical', weight: 30,
+    requires: ({ contract, doc }) => (contract?.abn && doc.supplierAbn ? null : NEEDS_CONTRACT),
+    evaluate({ doc, contract }) {
+      const digits = (v) => String(v).replace(/\D/g, '');
+      if (digits(contract.abn) === digits(doc.supplierAbn)) return null;
+      return {
+        evidence: `The contract is with ABN ${contract.abn}; this invoice is issued by ${doc.supplierAbn}.`,
+        recommendation: 'A different legal entity is claiming against this contract.',
+      };
+    },
+  },
+  {
+    id: 'CON_LICENCE_MISMATCH',
+    title: 'Builder licence differs from the contracted builder',
+    parameter: 'Invoice licence number vs the contract',
+    layer: 'contract', severity: 'high', weight: 20,
+    requires: ({ contract, doc }) => (contract?.licence && doc.supplierLicence ? null : NEEDS_CONTRACT),
+    evaluate({ doc, contract }) {
+      const norm = (v) => String(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (norm(contract.licence) === norm(doc.supplierLicence)) return null;
+      return { evidence: `Contract licence ${contract.licence}; this invoice quotes ${doc.supplierLicence}.` };
+    },
+  },
+  {
+    id: 'CON_STAGE_NOT_IN_SCHEDULE',
+    title: 'Claim is for a stage that is not in the contract schedule',
+    parameter: 'Claimed stage vs the contracted stage schedule',
+    layer: 'contract', severity: 'medium', weight: 16,
+    requires: ({ contract, doc }) => (contract?.stages?.length && doc.lineItems.length ? null : NEEDS_CONTRACT),
+    evaluate({ doc, contract }) {
+      const claimed = doc.lineItems.map((li) => classifyStage(li.description)).find(Boolean);
+      if (!claimed) return null;
+      const match = contract.stages.find((s) => classifyStage(s.name)?.name === claimed.name);
+      if (match) return null;
+      return {
+        evidence: `The invoice claims "${claimed.name}". The contract schedules: `
+          + `${contract.stages.map((s) => s.name).join(', ')}.`,
+        recommendation: 'A claim outside the schedule is either a variation, which needs its own approval, or an invention.',
+      };
+    },
+  },
+  {
+    id: 'CON_CLAIM_EXCEEDS_STAGE',
+    title: 'Claim is larger than the contracted value of its stage',
+    parameter: 'Claim amount vs stage percentage of the contract sum',
+    layer: 'contract', severity: 'high', weight: 24,
+    requires: ({ contract, doc }) => {
+      if (!contract?.contractSum || !contract?.stages?.length) return NEEDS_CONTRACT;
+      if (doc.total == null || !doc.lineItems.length) return 'The invoice total or its stage could not be read.';
+      return null;
+    },
+    evaluate({ doc, contract }) {
+      const claimed = doc.lineItems.map((li) => classifyStage(li.description)).find(Boolean);
+      if (!claimed) return null;
+      const stage = contract.stages.find((s) => classifyStage(s.name)?.name === claimed.name);
+      if (!stage || !stage.percent) return null;
+      const entitled = (Number(contract.contractSum) * Number(stage.percent)) / 100;
+      // Progress claims carry variations, so only a material overrun is a finding.
+      if (doc.total <= entitled * 1.05) return null;
+      return {
+        evidence: `"${stage.name}" is ${stage.percent}% of a ${fmt(contract.contractSum)} contract sum, `
+          + `which is ${fmt(entitled)}. This claim is ${fmt(doc.total)} - `
+          + `${(((doc.total - entitled) / entitled) * 100).toFixed(0)}% over.`,
+        recommendation: 'Check for an approved variation. Without one, this is over-claiming against the schedule.',
+        detail: { entitled, claimed: doc.total, stage: stage.name },
+      };
+    },
+  },
+  {
+    id: 'CON_CUMULATIVE_EXCEEDS_CONTRACT',
+    title: 'Paying this claim would draw more than the contract sum',
+    parameter: 'Drawn to date + this claim vs the contract sum',
+    layer: 'contract', severity: 'critical', weight: 40,
+    requires: ({ contract, doc }) => {
+      if (!contract?.contractSum || contract.drawnToDate === null || contract.drawnToDate === undefined) {
+        return 'Needs the contract sum and the amount drawn to date.';
+      }
+      return doc.amountDue == null ? 'The amount due could not be read from the invoice.' : null;
+    },
+    evaluate({ doc, contract }) {
+      const total = Number(contract.drawnToDate) + doc.amountDue;
+      if (total <= Number(contract.contractSum)) return null;
+      return {
+        evidence: `${fmt(contract.drawnToDate)} has been drawn against a ${fmt(contract.contractSum)} contract. `
+          + `This claim of ${fmt(doc.amountDue)} would take the total to ${fmt(total)} - `
+          + `${fmt(total - Number(contract.contractSum))} over.`,
+        recommendation: 'Do not release. Either the contract sum has been varied and the loan file is stale, '
+          + 'or the project is being over-drawn and the cost to complete is already unfunded.',
+        detail: { drawn: contract.drawnToDate, claim: doc.amountDue, contractSum: contract.contractSum },
+      };
+    },
+  },
+];
+
+export const RULES = [...paymentRules, ...contractRules, ...forensicsRules, ...documentRules, ...metadataRules];
 export const RULE_COUNT = RULES.length;

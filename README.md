@@ -73,26 +73,53 @@ account change still blocks the drawdown.
 
 ---
 
-## Is a known-good invoice mandatory?
+## Evidence is optional, the verdict is capped by it
 
-Yes — known-good details are, in one of two forms. Measured against the
-bundled forgery rather than assumed:
+The invoice is the only required input. Everything else is optional and
+composes — supply any combination and the checks that can run, run:
 
-| Known-good input | Checks that run | Score | Verdict |
-|---|---|---|---|
-| Nothing | 30 of 53 | 28 | Review only — **the forgery gets through** |
-| Bank details typed in | 36–39 of 53 | 90 | Block |
-| A known-good invoice | 51 of 53 | 100 | Block |
+| Evidence supplied | Checks that run | Best verdict available |
+|---|---|---|
+| Invoice only | 30 of 60 | No tampering found — payee unverified |
+| + known-good bank details | 39 of 60 | Likely authentic |
+| + known-good invoice | 52 of 60 | Likely authentic |
+| + building contract | 45 of 60 | Likely authentic |
+| + contract and known-good invoice | 59 of 60 | Likely authentic |
 
-So the console refuses to run until one of the two is present. A reference
-invoice runs more checks; typed BSB and account number are enough to block.
+**Screening one invoice alone is worth doing.** All the document forensics run —
+overlays, hidden text under a patch, typography drift, metadata, arithmetic. The
+bundled tamper and retype samples both reach a blocking verdict on the invoice
+alone.
 
-The crude overlay tamper is the exception — it scores 100 with no known-good
-input at all, because the original account is still recoverable underneath the
-patch. Forgery and tamper are different problems, and the console says which
-one it found.
+**What one document can never tell you is where the money is going.** A faithful
+copy of a genuine invoice with only the account changed is clean on every check
+a single file can answer — we measured it: it scores 0. So the tool will not say
+*likely authentic* without something to check the payee against. It says
+**"No tampering found — payee unverified"** instead, and names what it did not
+check. A verdict should never imply more assurance than the evidence carries.
+
+After every screening the result states what more would buy:
+*"14 more with a known-good invoice · 5 more with known-good bank details ·
+6 more with the building contract"* — derived from the reasons the rules
+themselves gave, so the hint cannot drift from the engine.
 
 ---
+
+### The building contract is the strongest anchor
+
+Every other baseline sits downstream of the channel the attacker compromised: a
+reference invoice comes out of the borrower's mailbox, typed details from
+someone who may be reading the hijacked thread, a learned account from a payment
+that already settled. The executed contract is held by the bank, signed before
+the first claim, and the fraudster never sees it — so where the contract and the
+payment history disagree, the contract wins.
+
+Seven checks run off it, including the two that reach past redirection into
+over-claiming: a claim larger than its stage's share of the contract sum, and a
+drawdown that would take the project past the contract sum altogether.
+
+Measured on the adversarial clone: the contract alone blocks it at **100**,
+where a known-good invoice reaches **78**.
 
 ## What the reviewer sees
 

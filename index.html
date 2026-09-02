@@ -42,51 +42,85 @@
       <li class="step">
         <div class="step-head">
           <span class="step-num">2</span>
-          <h2>Known-good details <span class="req">required</span></h2>
+          <h2>Corroborating evidence <span class="opt-tag">all optional</span></h2>
         </div>
         <p class="step-why">
-          A forged invoice can carry a valid ABN, a real BSB correctly paired with its bank, an exact
-          account-name match and perfect GST arithmetic. Nothing inside the page contradicts anything
-          else inside the page, so screening it alone finds nothing decisive.
-          <button type="button" class="linkish" id="whyToggle" aria-expanded="false">See the measured difference</button>
+          Screen the invoice on its own and you get the document forensics — tampering, overlays,
+          typography, metadata. What one document cannot tell you is whether the money is going to
+          the right account. Add any of these, in any combination, and more checks unlock.
+          <button type="button" class="linkish" id="whyToggle" aria-expanded="false">See what each one buys</button>
         </p>
         <div class="why-detail" id="whyDetail" hidden>
           <table class="mini">
-            <thead><tr><th>Known-good input</th><th>Checks that run</th><th>Score on the bundled forgery</th></tr></thead>
+            <thead><tr><th>Evidence supplied</th><th>Checks that run</th><th>Best verdict available</th></tr></thead>
             <tbody>
-              <tr><td>Nothing</td><td class="num">30 of 53</td><td><span class="chip chip-review">28 · review only</span></td></tr>
-              <tr><td>Bank details typed in</td><td class="num">36–39 of 53</td><td><span class="chip chip-block">90 · block</span></td></tr>
-              <tr><td>A known-good invoice</td><td class="num">51 of 53</td><td><span class="chip chip-block">100 · block</span></td></tr>
+              <tr><td>Invoice only</td><td class="num">30 of 60</td><td>No tampering found — payee unverified</td></tr>
+              <tr><td>+ known-good invoice</td><td class="num">52 of 60</td><td>Likely authentic</td></tr>
+              <tr><td>+ building contract</td><td class="num">45 of 60</td><td>Likely authentic</td></tr>
+              <tr><td>+ both</td><td class="num">59 of 60</td><td>Likely authentic</td></tr>
             </tbody>
           </table>
-          <p>That is why this step is mandatory. Either form works; a reference invoice runs more checks.</p>
+          <p>A faithful copy of a genuine invoice with only the account changed is clean on every check
+            a single document can answer. That is why the tool will not say “likely authentic” without
+            something to check the payee against — it says what it actually found instead.</p>
         </div>
 
-        <div class="tabs" role="tablist">
-          <button type="button" class="tab is-active" role="tab" aria-selected="true" data-tab="reference">Known-good invoice</button>
-          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="details">Enter bank details</button>
-        </div>
+        <div class="evidence" id="evidenceList">
+          <details class="ev" data-ev="reference">
+            <summary><span class="ev-name">Known-good invoice</span>
+              <span class="ev-state" data-state>not supplied</span></summary>
+            <div class="ev-body">
+              <div class="drop" id="dropReference" tabindex="0" role="button" aria-label="Choose a known-good reference invoice">
+                <input type="file" id="fileReference" accept="application/pdf,.pdf" hidden>
+                <p class="drop-cta">Drop a previous invoice you know is genuine</p>
+              </div>
+              <p class="fieldnote">Unlocks template, font, letterhead and toolchain comparison.</p>
+            </div>
+          </details>
 
-        <div class="tabpane" data-pane="reference">
-          <div class="drop" id="dropReference" tabindex="0" role="button" aria-label="Choose a known-good reference invoice">
-            <input type="file" id="fileReference" accept="application/pdf,.pdf" hidden>
-            <p class="drop-cta">Drop a previous invoice you know is genuine</p>
-          </div>
-          <p class="fieldnote">Runs the full check set, including template, font and letterhead comparison.</p>
-        </div>
+          <details class="ev" data-ev="details">
+            <summary><span class="ev-name">Known-good bank details</span>
+              <span class="ev-state" data-state>not supplied</span></summary>
+            <div class="ev-body">
+              <div class="grid2">
+                <label class="field"><span>Bank</span><input id="kgBank" placeholder="ANZ" autocomplete="off"></label>
+                <label class="field"><span>BSB</span><input id="kgBsb" placeholder="013 006" inputmode="numeric" autocomplete="off"></label>
+                <label class="field"><span>Account number</span><input id="kgAccount" placeholder="384920175" inputmode="numeric" autocomplete="off"></label>
+                <label class="field"><span>Account name</span><input id="kgAccountName" placeholder="Harrowgate Homes Pty Ltd" autocomplete="off"></label>
+                <label class="field"><span>Supplier ABN</span><input id="kgAbn" placeholder="53 173 584 802" autocomplete="off"></label>
+                <label class="field"><span>Builder licence</span><input id="kgLicence" placeholder="CC2074R" autocomplete="off"></label>
+                <label class="field"><span>Contact email</span><input id="kgEmail" type="email" placeholder="accounts@builder.com.au" autocomplete="off"></label>
+                <label class="field"><span>Contact phone</span><input id="kgPhone" placeholder="0491 570 110" autocomplete="off"></label>
+              </div>
+              <p class="fieldnote">Take these from the loan file — never from the invoice being screened.</p>
+            </div>
+          </details>
 
-        <div class="tabpane" data-pane="details" hidden>
-          <div class="grid2">
-            <label class="field"><span>Bank<i>required</i></span><input id="kgBank" placeholder="ANZ" autocomplete="off"></label>
-            <label class="field"><span>BSB<i>required</i></span><input id="kgBsb" placeholder="013 006" inputmode="numeric" autocomplete="off"></label>
-            <label class="field"><span>Account number<i>required</i></span><input id="kgAccount" placeholder="384920175" inputmode="numeric" autocomplete="off"></label>
-            <label class="field"><span>Account name</span><input id="kgAccountName" placeholder="Harrowgate Homes Pty Ltd" autocomplete="off"></label>
-            <label class="field"><span>Supplier ABN</span><input id="kgAbn" placeholder="53 173 584 802" autocomplete="off"></label>
-            <label class="field"><span>Builder licence</span><input id="kgLicence" placeholder="CC2074R" autocomplete="off"></label>
-            <label class="field"><span>Contact email</span><input id="kgEmail" type="email" placeholder="accounts@builder.com.au" autocomplete="off"></label>
-            <label class="field"><span>Contact phone</span><input id="kgPhone" placeholder="0491 570 110" autocomplete="off"></label>
-          </div>
-          <p class="fieldnote">Take these from the building contract or the bank's payee record — never from the invoice being screened.</p>
+          <details class="ev" data-ev="contract">
+            <summary><span class="ev-name">Building contract</span>
+              <span class="ev-state" data-state>not supplied</span>
+              <span class="ev-best">strongest anchor</span></summary>
+            <div class="ev-body">
+              <p class="fieldnote" style="margin-top:0">
+                The contract was signed before any attack and lives in the bank’s loan file, so it is the
+                one baseline a fraudster cannot reach. Where it disagrees with payment history, it wins.
+              </p>
+              <div class="grid2">
+                <label class="field"><span>Contract sum</span><input id="cnSum" placeholder="420000" inputmode="decimal" autocomplete="off"></label>
+                <label class="field"><span>Drawn to date</span><input id="cnDrawn" placeholder="96250" inputmode="decimal" autocomplete="off"></label>
+                <label class="field"><span>Builder name</span><input id="cnBuilder" placeholder="Harrowgate Homes Pty Ltd" autocomplete="off"></label>
+                <label class="field"><span>Builder ABN</span><input id="cnAbn" placeholder="53 173 584 802" autocomplete="off"></label>
+                <label class="field"><span>Builder licence</span><input id="cnLicence" placeholder="CC2074R" autocomplete="off"></label>
+                <label class="field"><span>Contract phone</span><input id="cnPhone" placeholder="0491 570 110" autocomplete="off"></label>
+                <label class="field"><span>Nominated bank</span><input id="cnBank" placeholder="ANZ" autocomplete="off"></label>
+                <label class="field"><span>Nominated BSB</span><input id="cnBsb" placeholder="013 006" inputmode="numeric" autocomplete="off"></label>
+                <label class="field"><span>Nominated account</span><input id="cnAccount" placeholder="384920175" inputmode="numeric" autocomplete="off"></label>
+              </div>
+              <label class="field"><span>Stage schedule <i>one per line, name and percent</i></span>
+                <textarea id="cnStages" rows="4" placeholder="Deposit: 5&#10;Site works: 10&#10;Base: 15&#10;Frame: 20&#10;Lock up: 25&#10;Fixing: 15&#10;Completion: 10"></textarea></label>
+              <button type="button" class="btn btn-quiet btn-small" id="cnFill">Fill a typical schedule</button>
+            </div>
+          </details>
         </div>
       </li>
     </ol>

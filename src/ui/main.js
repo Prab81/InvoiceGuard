@@ -27,7 +27,7 @@ const pdfReady = SINGLE_FILE
 
 const $ = (s) => document.querySelector(s);
 const state = {
-  subject: null, reference: null, mode: 'reference', last: null, filter: 'all',
+  subject: null, reference: null, last: null, filter: 'all',
   policy: loadPolicy(),
   // The parsed documents are kept so a policy change can be re-scored
   // without re-reading the PDFs.
@@ -115,24 +115,51 @@ function typedDetails() {
   };
 }
 
-/** Known-good input is mandatory: without it the decisive check cannot run. */
-function blockingReason() {
-  if (!state.subject) return 'Add the invoice you want screened.';
-  if (state.mode === 'reference') {
-    if (!state.reference) return 'Add a known-good invoice from the same supplier, or switch to entering the bank details.';
-    return null;
-  }
-  const d = typedDetails();
-  const digits = (v) => v.replace(/\D/g, '');
-  if (digits(d.bsb).length !== 6) return 'Enter the known-good BSB — six digits.';
-  if (digits(d.account).length < 5) return 'Enter the known-good account number.';
-  return null;
+function contractDetails() {
+  const v = (id) => $(id).value.trim();
+  const stages = v('#cnStages').split('\n').map((line) => {
+    const m = line.match(/^\s*(.+?)\s*[::]\s*([\d.]+)\s*%?\s*$/);
+    return m ? { name: m[1], percent: Number(m[2]) } : null;
+  }).filter(Boolean);
+  return {
+    contractSum: v('#cnSum'), drawnToDate: v('#cnDrawn'), builderName: v('#cnBuilder'),
+    abn: v('#cnAbn'), licence: v('#cnLicence'), phone: v('#cnPhone'),
+    nominated: { bank: v('#cnBank'), bsb: v('#cnBsb'), account: v('#cnAccount') },
+    stages,
+  };
+}
+
+const hasText = (...ids) => ids.some((id) => $(id).value.trim() !== '');
+
+/**
+ * Nothing but the invoice is required. Each source that is present unlocks more
+ * checks, and the panel says which are supplied so a reviewer can see at a
+ * glance what this assessment will be able to conclude.
+ */
+function evidenceState() {
+  const details = hasText('#kgBank', '#kgBsb', '#kgAccount', '#kgAccountName', '#kgAbn',
+    '#kgLicence', '#kgEmail', '#kgPhone');
+  const contract = hasText('#cnSum', '#cnDrawn', '#cnBuilder', '#cnAbn', '#cnLicence',
+    '#cnPhone', '#cnBank', '#cnBsb', '#cnAccount', '#cnStages');
+  return { reference: Boolean(state.reference), details, contract };
 }
 
 function refresh() {
-  const reason = blockingReason();
-  $('#analyseBtn').disabled = Boolean(reason);
-  $('#blocker').textContent = reason || '';
+  const ev = evidenceState();
+  document.querySelectorAll('.ev').forEach((el) => {
+    const on = ev[el.dataset.ev];
+    el.classList.toggle('is-set', on);
+    el.querySelector('[data-state]').textContent = on ? 'supplied' : 'not supplied';
+  });
+
+  $('#analyseBtn').disabled = !state.subject;
+  const anchored = ev.reference || ev.details || ev.contract;
+  $('#blocker').textContent = !state.subject
+    ? 'Add the invoice you want screened.'
+    : anchored
+      ? ''
+      : 'Screening on the document alone. Nothing here can confirm the payee — add any evidence above to check that too.';
+  $('#blocker').classList.toggle('blocker-warn', Boolean(state.subject) && !anchored);
 }
 
 /* --------------------------------------------------------- run it */
@@ -147,15 +174,17 @@ async function screen() {
   btn.innerHTML = '<span class="spinner"></span>Screening';
   try {
     await pdfReady;
+    const ev = evidenceState();
     const subject = await extract(await readFile(state.subject), state.subject.name);
-    let reference = null;
-    let details = null;
-    if (state.mode === 'reference' && state.reference) {
-      reference = await extract(await readFile(state.reference), state.reference.name);
-    } else {
-      details = typedDetails();
-    }
-    runAnalysis({ subject, reference, details });
+    const reference = ev.reference
+      ? await extract(await readFile(state.reference), state.reference.name)
+      : null;
+    runAnalysis({
+      subject,
+      reference,
+      details: ev.details ? typedDetails() : null,
+      contract: ev.contract ? contractDetails() : null,
+    });
   } catch (err) {
     console.error(err);
     toast(`Could not screen that file: ${err.message}`);
@@ -408,9 +437,11 @@ function render(result) {
       </div>`;
     }).join('');
 
-  const kgLabel = result.knownGood
-    ? (result.knownGood.source === 'reference-invoice' ? 'known-good invoice supplied' : 'known-good details entered')
-    : 'no known-good input';
+  const evidenceChips = [
+    result.contract ? 'building contract' : null,
+    reference ? 'known-good invoice' : null,
+    result.knownGood?.sources?.includes('entered-details') ? 'entered details' : null,
+  ].filter(Boolean);
 
   $('#results').innerHTML = `
     <section class="panel band-${risk.band}">
@@ -421,7 +452,9 @@ function render(result) {
           <p class="decision">${esc(risk.decision)}</p>
           <div class="chips">
             <span class="pill pill-quiet">${esc(subject.filename)}</span>
-            <span class="pill ${result.knownGood ? 'pill-good' : 'pill-warn'}">${esc(kgLabel)}</span>
+            <span class="pill ${result.assurance.payeeAssessed ? 'pill-good' : 'pill-warn'}"
+                  title="${esc(result.assurance.note)}">${esc(result.assurance.label)}</span>
+            ${evidenceChips.map((c) => `<span class="pill pill-quiet">${esc(c)}</span>`).join('')}
             <span class="pill pill-quiet">${coverage.ran} of ${coverage.total} checks ran</span>
             <span class="pill ${triggered.length ? 'pill-bad' : 'pill-good'}">${triggered.length} triggered</span>
             <span class="pill pill-quiet">confidence: ${esc(risk.confidence.level)}</span>
@@ -429,6 +462,10 @@ function render(result) {
         </div>
       </div>
       <div class="layers">${layerRows || '<p class="fieldnote">No layer scored above zero.</p>'}</div>
+      ${result.unlocks?.length ? `<div class="unlock">
+        <span class="unlock-lab">Not yet checked</span>
+        <span>${result.unlocks.map((u) => `<b>${u.unlocks}</b> more with ${esc(u.evidence)}`).join(' · ')}</span>
+      </div>` : ''}
       <div class="export-bar">
         <span class="fieldnote">Save this assessment</span>
         <button type="button" class="btn btn-quiet" data-export="docx">Download Word</button>
@@ -488,21 +525,17 @@ function render(result) {
 wireDrop('#dropSubject', '#fileSubject', 'subject');
 wireDrop('#dropReference', '#fileReference', 'reference');
 
-document.querySelectorAll('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => {
-    state.mode = tab.dataset.tab;
-    document.querySelectorAll('.tab').forEach((t) => {
-      const on = t === tab;
-      t.classList.toggle('is-active', on);
-      t.setAttribute('aria-selected', String(on));
-    });
-    document.querySelectorAll('.tabpane').forEach((p) => { p.hidden = p.dataset.pane !== state.mode; });
-    refresh();
-  });
-});
+document.querySelectorAll('.ev input, .ev textarea')
+  .forEach((el) => el.addEventListener('input', refresh));
 
-document.querySelectorAll('.tabpane[data-pane="details"] input')
-  .forEach((input) => input.addEventListener('input', refresh));
+$('#cnFill').addEventListener('click', () => {
+  // A common residential progress schedule. Percentages vary by contract, so
+  // this is a starting point to edit, not a default to trust.
+  $('#cnStages').value = ['Deposit: 5', 'Site works: 10', 'Base: 15', 'Frame: 20',
+    'Lock up: 25', 'Fixing: 15', 'Completion: 10'].join('\n');
+  $('#cnStages').closest('.ev').open = true;
+  refresh();
+});
 
 $('#intake').addEventListener('submit', (e) => { e.preventDefault(); screen(); });
 
@@ -522,7 +555,8 @@ $('#resetBtn').addEventListener('click', () => {
     zone.querySelector('.drop-cta').outerHTML =
       `<p class="drop-cta">${sel === '#dropSubject' ? 'Drop a PDF here, or click to choose' : 'Drop a previous invoice you know is genuine'}</p>`;
   });
-  document.querySelectorAll('.tabpane[data-pane="details"] input').forEach((i) => { i.value = ''; });
+  document.querySelectorAll('.ev input[type="text"], .ev input:not([type]), .ev input[type="email"], .ev textarea')
+    .forEach((i) => { i.value = ''; });
   $('#fileSubject').value = '';
   $('#fileReference').value = '';
   refresh();

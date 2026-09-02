@@ -133,11 +133,15 @@ test('a reference invoice runs more checks than typed details', () => {
   assert.equal(withRef.coverage.total, RULES.length);
 });
 
-test('without known-good input the forgery is NOT caught - which is why it is mandatory', () => {
+test('without payee evidence the forgery is not blocked, and the tool says so', () => {
+  // Evidence is optional, but the verdict is capped by what the evidence can
+  // support: a re-rendered forgery still draws metadata findings, and the tool
+  // states plainly that the payee was never checked.
   const r = analyze({ subject: docs.forged });
   assert.notEqual(r.risk.band, 'high_risk');
   assert.equal(r.risk.confidence.level, 'limited');
-  assert.ok(r.notices.some((n) => /strongest check/.test(n.text)));
+  assert.equal(r.assurance.payeeAssessed, false);
+  assert.ok(r.notices.some((n) => n.kind === 'warning' && /payee/i.test(n.text)));
 });
 
 test('the crude overlay tamper is caught on structure alone', () => {
@@ -149,12 +153,24 @@ test('the crude overlay tamper is caught on structure alone', () => {
   }
 });
 
-test('a genuine invoice scores zero in every input mode', () => {
+test('a genuine invoice scores zero however much evidence is supplied', () => {
   for (const opts of [{}, { details: KNOWN_GOOD_DETAILS }, { reference: docs.genuine }]) {
     const r = analyze({ subject: docs.genuineNew, ...opts });
-    assert.equal(r.risk.band, 'likely_authentic', JSON.stringify(r.risk.topReasons));
-    assert.equal(r.risk.score, 0);
+    assert.equal(r.risk.score, 0, JSON.stringify(r.risk.topReasons));
   }
+});
+
+test('"likely authentic" is unearnable without something to check the payee against', () => {
+  // A faithful copy of a genuine invoice with only the account changed is clean
+  // on every check a single document can answer, so a positive verdict on
+  // intrinsic evidence alone would be a claim the evidence cannot support.
+  const alone = analyze({ subject: docs.genuineNew });
+  assert.equal(alone.risk.band, 'document_only');
+  assert.equal(alone.assurance.payeeAssessed, false);
+
+  const anchored = analyze({ subject: docs.genuineNew, details: KNOWN_GOOD_DETAILS });
+  assert.equal(anchored.risk.band, 'likely_authentic');
+  assert.equal(anchored.assurance.payeeAssessed, true);
 });
 
 test('re-screening the same file against itself does not report a duplicate', () => {
@@ -444,4 +460,110 @@ test('the report says so plainly when the shipped policy was used', () => {
   const report = buildReport(analyze({ subject: docs.forged, reference: docs.genuine }));
   const section = report.sections.find((s) => s.heading === 'Policy in force');
   assert.match(section.blocks[0].text, /shipped rule set was used unchanged/);
+});
+
+
+/* ------------------------------------------------------- evidence model */
+const CONTRACT = {
+  contractSum: '420000', drawnToDate: '96250', builderName: 'Harrowgate Homes Pty Ltd',
+  abn: '53 173 584 802', licence: 'CC2074R', phone: '0491 570 110',
+  nominated: { bank: 'ANZ', bsb: '013 006', account: '384920175' },
+  stages: [
+    { name: 'Deposit', percent: 5 }, { name: 'Site works', percent: 10 }, { name: 'Base', percent: 15 },
+    { name: 'Frame', percent: 20 }, { name: 'Lock up', percent: 25 }, { name: 'Fixing', percent: 15 },
+    { name: 'Completion', percent: 10 },
+  ],
+};
+
+test('the invoice is the only required input', () => {
+  const r = analyze({ subject: docs.forged });
+  assert.ok(r.coverage.ran > 25);
+  assert.equal(r.assurance.level, 'document-only');
+});
+
+test('a tampered document is caught on the invoice alone', () => {
+  // The whole point of making the other evidence optional: intrinsic forensics
+  // still reach a blocking verdict with one file.
+  for (const doc of [docs.tampered, docs.retyped]) {
+    const r = analyze({ subject: doc });
+    assert.equal(r.risk.band, 'high_risk', doc.filename);
+    assert.equal(r.assurance.payeeAssessed, false);
+  }
+});
+
+test('every combination of evidence composes', () => {
+  const combos = [
+    ['invoice only', {}, 'document-only'],
+    ['+ details', { details: KNOWN_GOOD_DETAILS }, 'history-anchored'],
+    ['+ reference', { reference: docs.genuine }, 'history-anchored'],
+    ['+ contract', { contract: CONTRACT }, 'contract-anchored'],
+    ['+ contract + reference', { contract: CONTRACT, reference: docs.genuine }, 'contract-anchored'],
+    ['+ everything', { contract: CONTRACT, reference: docs.genuine, details: KNOWN_GOOD_DETAILS }, 'contract-anchored'],
+  ];
+  let previousCoverage = 0;
+  for (const [label, opts, expected] of combos) {
+    const r = analyze({ subject: docs.forged, ...opts });
+    assert.equal(r.assurance.level, expected, label);
+    assert.equal(r.ledger.length, RULES.length, label);
+    previousCoverage = Math.max(previousCoverage, r.coverage.ran);
+  }
+  // More evidence never means fewer checks.
+  assert.ok(analyze({ subject: docs.forged, contract: CONTRACT, reference: docs.genuine }).coverage.ran
+    > analyze({ subject: docs.forged }).coverage.ran);
+});
+
+test('the contract alone blocks a clone that a reference invoice only reaches 78 on', () => {
+  const withContract = analyze({ subject: docs.forged, contract: CONTRACT });
+  assert.equal(withContract.risk.band, 'high_risk');
+  assert.ok(firedIds(withContract).includes('CON_ACCOUNT_NOT_CONTRACTED'));
+});
+
+test('a claim to the contracted account is positively confirmed', () => {
+  const r = analyze({ subject: docs.genuineNew, contract: CONTRACT });
+  assert.ok(firedIds(r).includes('CON_ACCOUNT_MATCHES_CONTRACT'));
+  assert.equal(r.risk.band, 'likely_authentic');
+});
+
+test('over-claiming against the stage schedule is caught', () => {
+  // Lock up is 25% of 420,000 = 105,000. The genuine frame-stage invoice is
+  // well inside its stage, so re-point the schedule to make the claim excessive.
+  const tight = { ...CONTRACT, stages: [{ name: 'Frame', percent: 2 }] };
+  const r = analyze({ subject: docs.genuineNew, contract: tight });
+  const hit = r.ledger.find((e) => e.id === 'CON_CLAIM_EXCEEDS_STAGE');
+  assert.equal(hit.status, 'triggered');
+  assert.match(hit.evidence, /over/);
+});
+
+test('drawing past the contract sum is caught', () => {
+  const nearlyDrawn = { ...CONTRACT, drawnToDate: '410000' };
+  const r = analyze({ subject: docs.genuineNew, contract: nearlyDrawn });
+  const hit = r.ledger.find((e) => e.id === 'CON_CUMULATIVE_EXCEEDS_CONTRACT');
+  assert.equal(hit.status, 'triggered');
+  assert.equal(hit.severity, 'critical');
+});
+
+test('the contract outranks a poisoned payment history', () => {
+  // The exact inversion found in the red-team probe: a fraudulent account
+  // learned as known-good. The contract must still block it.
+  const poisoned = { ...KNOWN_GOOD_DETAILS, bsb: '062-000', account: '10456213', bank: 'Commonwealth' };
+  const r = analyze({ subject: docs.forged, details: poisoned, contract: CONTRACT });
+  assert.equal(r.risk.band, 'high_risk');
+  assert.ok(firedIds(r).includes('CON_ACCOUNT_NOT_CONTRACTED'));
+});
+
+test('the result says what more evidence would unlock', () => {
+  const r = analyze({ subject: docs.forged });
+  assert.ok(r.unlocks.length >= 2);
+  for (const u of r.unlocks) {
+    assert.ok(u.unlocks > 0);
+    assert.ok(u.evidence.length > 3);
+  }
+  assert.equal(analyze({ subject: docs.forged, contract: CONTRACT, reference: docs.genuine }).unlocks
+    .some((u) => /contract|known-good invoice/.test(u.evidence)), false);
+});
+
+test('a contract with nothing filled in is treated as absent', () => {
+  const r = analyze({ subject: docs.forged, contract: { contractSum: '', stages: [], nominated: {} } });
+  assert.equal(r.contract, null);
+  assert.equal(r.assurance.level, 'document-only');
 });
